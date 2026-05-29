@@ -1,4 +1,4 @@
-﻿let missions = [];
+﻿﻿let missions = [];
 let viewStart, viewEnd; 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -18,8 +18,8 @@ function init() {
     let currentFY = now.getFullYear();
     if (now.getMonth() >= 9) currentFY += 1; 
     document.getElementById('fy-input').value = currentFY;
-    
-    snapToCurrentMonth();
+
+    snapToFourteenDayOutlook();
     addDummyData();
 }
 
@@ -32,9 +32,9 @@ function snapToCurrentMonth() {
 
 function snapToSevenDayOutlook() {
     const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()-1);
     const end = new Date(start);
-    end.setDate(end.getDate() + 7);
+    end.setDate(end.getDate() + 8);
     end.setHours(23, 59, 59, 999);
 
     viewStart = start.getTime();
@@ -45,9 +45,9 @@ function snapToSevenDayOutlook() {
 
 function snapToFourteenDayOutlook() {
     const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()-1);
     const end = new Date(start);
-    end.setDate(end.getDate() + 14);
+    end.setDate(end.getDate() + 15);
     end.setHours(23, 59, 59, 999);
 
     viewStart = start.getTime();
@@ -176,36 +176,56 @@ function renderTimeline() {
     const totalDaysVisible = duration / MS_PER_DAY;
 
     // Adaptive divider rendering
-    if (totalDaysVisible <= 90) {
+    if (totalDaysVisible <= 365) {
+        const visibleDays = [];
         let iterDay = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
         while (iterDay <= new Date(viewEnd)) {
-            const time = iterDay.getTime();
-            const leftPct = ((time - viewStart) / duration) * 100;
-
-            const marker = document.createElement('div');
-            marker.className = 'grid-marker day';
-            marker.style.left = `${leftPct}%`;
-
-            if (pxPerDay > 22) {
-                marker.innerHTML = `<div class="grid-label day-label">${iterDay.getDate()}</div>`;
-            }
-            gridContainer.appendChild(marker);
+            visibleDays.push(new Date(iterDay));
             iterDay.setDate(iterDay.getDate() + 1);
         }
-    } else if (totalDaysVisible <= 365) {
-        let iterWeek = new Date(startDate);
-        iterWeek.setDate(iterWeek.getDate() - iterWeek.getDay());
 
-        while (iterWeek <= new Date(viewEnd)) {
-            const time = iterWeek.getTime();
-            const leftPct = ((time - viewStart) / duration) * 100;
+        const dayLabelMode = getDayLabelMode(visibleDays, viewStart, duration, rect.width, pxPerDay);
 
-            const marker = document.createElement('div');
-            marker.className = 'week-marker';
-            marker.style.left = `${leftPct}%`;
+        if (dayLabelMode !== 'none') {
+            visibleDays.forEach(dayDate => {
+                const time = dayDate.getTime();
+                const leftPx = ((time - viewStart) / duration) * rect.width;
+                const leftPct = (leftPx / rect.width) * 100;
+                const widthPct = (MS_PER_DAY / duration) * 100;
 
-            gridContainer.appendChild(marker);
-            iterWeek.setDate(iterWeek.getDate() + 7);
+                if (isWeekend(dayDate)) {
+                    const weekendHighlight = document.createElement('div');
+                    weekendHighlight.className = 'weekend-highlight';
+                    weekendHighlight.style.left = `${leftPct}%`;
+                    weekendHighlight.style.width = `${widthPct}%`;
+                    gridContainer.appendChild(weekendHighlight);
+                }
+
+                const marker = document.createElement('div');
+                marker.className = 'grid-marker day';
+                marker.style.left = `${leftPct}%`;
+
+                const labelText = getDayLabelText(dayDate, dayLabelMode);
+                if (labelText && canFitDayLabel(labelText, leftPx, pxPerDay, rect.width)) {
+                    marker.innerHTML = `<div class="grid-label day-label">${labelText}</div>`;
+                }
+                gridContainer.appendChild(marker);
+            });
+        } else {
+            let iterWeek = new Date(startDate);
+            iterWeek.setDate(iterWeek.getDate() - iterWeek.getDay());
+
+            while (iterWeek <= new Date(viewEnd)) {
+                const time = iterWeek.getTime();
+                const leftPct = ((time - viewStart) / duration) * 100;
+
+                const marker = document.createElement('div');
+                marker.className = 'week-marker';
+                marker.style.left = `${leftPct}%`;
+
+                gridContainer.appendChild(marker);
+                iterWeek.setDate(iterWeek.getDate() + 7);
+            }
         }
     }
 
@@ -246,6 +266,7 @@ function renderTimeline() {
 
     // MONTH + FY MARKERS
     const visibleMonths = [];
+    const stackMonthLabels = totalDaysVisible > 365;
     let iterMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
     if (iterMonth.getTime() > viewStart) {
         iterMonth.setMonth(iterMonth.getMonth() - 1);
@@ -277,7 +298,7 @@ function renderTimeline() {
         const minLeft = 12;
         let labelLeft = Math.max(leftPx + 6, minLeft);
 
-        if (nextMonth) {
+        if (!stackMonthLabels && nextMonth) {
             labelLeft = Math.min(labelLeft, nextLeftPx - labelWidth);
         }
         label.style.left = `${labelLeft}px`;
@@ -289,11 +310,11 @@ function renderTimeline() {
     // --- TAIL ROW ASSIGNMENT ---
     const uniqueTails = [...new Set(missions.map(m => m.tailNum ? m.tailNum.toUpperCase() : 'TBD'))].sort();
     const rowHeight = 46;
-    const rowOffset = 10;
+    const rowOffset = 24; // Start tail rows below the day-label divider.
 
     // Dynamically adjust viewport height to fit all tails
-    const requiredHeight = 104 + (uniqueTails.length * rowHeight) + rowOffset;
-    viewport.style.height = `${Math.max(250, requiredHeight)}px`;
+    const requiredHeight = 72 + rowOffset + (uniqueTails.length * rowHeight);
+    viewport.style.height = `${requiredHeight}px`;
 
     // Render Tail Rows and Labels inside the fixed Sidebar
     uniqueTails.forEach((tail, index) => {
@@ -539,6 +560,93 @@ document.getElementById('btn-export-csv').addEventListener('click', exportMissio
 function toDateTimeLocal(date) {
     const pad = n => n < 10 ? '0' + n : n;
     return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+}
+
+let dayLabelMeasureCtx = null;
+let dayLabelMeasureFont = '';
+
+function getDayLabelMeasureFont() {
+    if (dayLabelMeasureFont) return dayLabelMeasureFont;
+
+    const probe = document.createElement('span');
+    probe.className = 'grid-label day-label';
+    probe.style.position = 'absolute';
+    probe.style.visibility = 'hidden';
+    probe.style.whiteSpace = 'nowrap';
+    probe.textContent = '00 - Wednesday';
+    document.body.appendChild(probe);
+
+    const computedStyle = getComputedStyle(probe);
+    dayLabelMeasureFont = computedStyle.font || `${computedStyle.fontWeight} ${computedStyle.fontSize} ${computedStyle.fontFamily}`;
+    probe.remove();
+
+    return dayLabelMeasureFont;
+}
+
+function measureDayLabelWidth(text) {
+    if (!dayLabelMeasureCtx) {
+        dayLabelMeasureCtx = document.createElement('canvas').getContext('2d');
+    }
+
+    dayLabelMeasureCtx.font = getDayLabelMeasureFont();
+    return dayLabelMeasureCtx.measureText(text).width;
+}
+
+function canFitDayLabel(text, leftPx, pxPerDay, viewportWidth) {
+    if (leftPx < 0 || leftPx >= viewportWidth) return false;
+    const paddingAllowance = 8;
+    const buffer = 4;
+    const availableWidth = Math.min(pxPerDay, viewportWidth - leftPx);
+    return availableWidth >= (measureDayLabelWidth(text) + paddingAllowance + buffer);
+}
+
+function getDayLabelText(date, mode) {
+    const dayNumber = String(date.getDate()).padStart(2, '0');
+
+    if (mode === 'full') {
+        const dayOfWeek = date.toLocaleDateString('en-US', { weekday: 'long' });
+        return `${dayNumber} - ${dayOfWeek}`;
+    }
+
+    if (mode === 'short') {
+        const dayAbbrev = date.toLocaleDateString('en-US', { weekday: 'short' });
+        return `${dayNumber} - ${dayAbbrev}`;
+    }
+
+    if (mode === 'day') {
+        return dayNumber;
+    }
+
+    return '';
+}
+
+function getDayLabelMode(dayDates, viewStart, duration, viewportWidth, pxPerDay) {
+    const modes = ['full', 'short', 'day'];
+    const fullVisibleDays = dayDates.filter(date => isFullDayVisible(date, viewStart, viewStart + duration));
+    const testDays = fullVisibleDays.length > 0 ? fullVisibleDays : dayDates;
+
+    for (const mode of modes) {
+        const fitsEveryLabel = testDays.every(date => {
+            const leftPx = ((date.getTime() - viewStart) / duration) * viewportWidth;
+            const labelText = getDayLabelText(date, mode);
+            return canFitDayLabel(labelText, leftPx, pxPerDay, viewportWidth);
+        });
+
+        if (fitsEveryLabel) return mode;
+    }
+
+    return 'none';
+}
+
+function isFullDayVisible(date, viewStart, viewEnd) {
+    const dayStart = date.getTime();
+    const dayEnd = dayStart + MS_PER_DAY - 1;
+    return dayStart >= viewStart && dayEnd <= viewEnd;
+}
+
+function isWeekend(date) {
+    const day = date.getDay();
+    return day === 0 || day === 6;
 }
 
 function csvEscape(value) {

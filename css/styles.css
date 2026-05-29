@@ -66,15 +66,15 @@
         background: #fff;
     }
 
-    #timeline-labels {
-        position: relative;
-        top: 32px; /* Offsets down to match #timeline-missions placement */
-    }
+#timeline-labels {
+    position: relative;
+    top: 0;
+}
 
     #timeline-viewport { 
         flex: 1;
         position: relative; 
-        min-height: 250px; 
+        min-height: 0px; 
         overflow: hidden; 
         cursor: grab; 
         user-select: none; 
@@ -96,11 +96,11 @@
     }
     
     #timeline-grid { top: 72px; height: calc(100% - 72px); pointer-events: none; z-index: 1; }
-    #timeline-missions { top: 104px; height: calc(100% - 104px); pointer-events: auto; z-index: 5; }
+#timeline-missions { top: 72px; height: calc(100% - 72px); pointer-events: auto; z-index: 5; }
 
     /* Grid Markers */
     .grid-marker { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--grid-line); display: flex; flex-direction: column; pointer-events: none; }
-    .grid-marker.day { border-left: 1px solid var(--grid-line-sub); }
+    .grid-marker.day { border-left: 1px solid var(--grid-line-sub); z-index: 2; }
     .grid-label { padding: 4px; font-size: 0.75rem; color: var(--text-muted); font-weight: bold; white-space: nowrap; cursor: pointer; border-radius: 0 0 4px 0;}
     .grid-label.day-label { font-weight: normal; font-size: 0.65rem; color: #999; }
 
@@ -118,8 +118,9 @@
     .month-marker { position: absolute; top: 0; bottom: 0; border-left: 2px solid var(--primary); }
     .fy-marker { position: absolute; top: 0; bottom: 0; border-left: 4px solid #000; z-index: 3; }
     .week-marker { position: absolute; top: 0; bottom: 0; border-left: 1px dashed #7aa7d9; }
-    .today-highlight { position: absolute; top: 0; bottom: 0; background: rgba(173, 216, 230, 0.25); z-index: 0; pointer-events: none; }
-    .current-time-line { position: absolute; top: 56px; bottom: 0; border-left: 2px dotted #007bff; z-index: 30; pointer-events: none; }
+    .weekend-highlight { position: absolute; top: 0; bottom: 0; background: rgba(160, 160, 160, 0.16); z-index: 0; pointer-events: none; }
+    .today-highlight { position: absolute; top: 0; bottom: 0; background: rgba(173, 216, 230, 0.25); z-index: 1; pointer-events: none; }
+    .current-time-line { position: absolute; top: 25px; bottom: 0; border-left: 2px dotted #007bff; z-index: 30; pointer-events: none; }
 
     .year-label {
         z-index: 35; position: absolute; top: 6px; background: rgba(255,255,255,0.98); padding: 4px 14px;
