@@ -17,6 +17,13 @@ const missionHomeFieldInput = document.getElementById('defaultHomeField');
 const DEFAULTS_STORAGE_KEY = 'themis-ops-mission-defaults';
 let missionDefaults = createEmptyMissionDefaults();
 const tabButtons = document.querySelectorAll('.app-tab');
+let airportData = {};
+let airportDataPromise = null;
+let hoverRouteMap = null;
+let hoverTooltipToken = 0;
+let hoverTooltipPosition = { x: 0, y: 0 };
+let tooltipMeasureCtx = null;
+let tooltipMeasureFont = '';
 
 function createEmptyMissionDefaults() {
     return {
@@ -56,6 +63,369 @@ function readMissionDefaultsForm() {
     return {
         homeField: missionHomeFieldInput ? missionHomeFieldInput.value.trim() : ''
     };
+}
+
+function normalizeIcao(code) {
+    return (code || '').trim().toUpperCase();
+}
+
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getDateTimestamp(date) {
+    return date instanceof Date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
+}
+
+function formatTooltipDateTime(date) {
+    return date instanceof Date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : 'TBD';
+}
+
+function getAirportDisplayName(code) {
+    const airport = airportData[normalizeIcao(code)];
+    if (airport && airport.name) return airport.name;
+    return normalizeIcao(code) || 'TBD';
+}
+
+function getTooltipLegText(leg, index) {
+    const takeoffName = getAirportDisplayName(leg.takeoffIcao);
+    const landName = getAirportDisplayName(leg.landIcao);
+    const takeoffTime = formatTooltipDateTime(leg.takeoffTime);
+    const landTime = formatTooltipDateTime(leg.landTime);
+    return `Leg ${index + 1}: ${takeoffName} (${takeoffTime}) → ${landName} (${landTime})`;
+}
+
+function getTooltipMeasureContext() {
+    if (tooltipMeasureFont && tooltipMeasureCtx) return tooltipMeasureCtx;
+
+    const probe = document.createElement('span');
+    probe.className = 'tooltip-leg-line';
+    probe.style.position = 'absolute';
+    probe.style.visibility = 'hidden';
+    probe.style.whiteSpace = 'nowrap';
+    probe.textContent = 'Leg 1: Sample Airport (00/00/0000, 12:00:00 AM) -> Sample Airport (00/00/0000, 12:00:00 AM)';
+    document.body.appendChild(probe);
+
+    const computedStyle = getComputedStyle(probe);
+    tooltipMeasureFont = computedStyle.font || `${computedStyle.fontWeight} ${computedStyle.fontSize} ${computedStyle.fontFamily}`;
+    probe.remove();
+
+    if (!tooltipMeasureCtx) {
+        tooltipMeasureCtx = document.createElement('canvas').getContext('2d');
+    }
+
+    tooltipMeasureCtx.font = tooltipMeasureFont;
+    return tooltipMeasureCtx;
+}
+
+function measureTooltipTextWidth(text) {
+    const ctx = getTooltipMeasureContext();
+    return ctx.measureText(text).width;
+}
+
+function setHoverTooltipWidth(mission) {
+    const legs = Array.isArray(mission.legs) ? [...mission.legs].sort((a, b) => getDateTimestamp(a.takeoffTime) - getDateTimestamp(b.takeoffTime)) : [];
+    const lines = legs.length > 0
+        ? legs.map((leg, index) => getTooltipLegText(leg, index))
+        : ['No route legs available.'];
+
+    const missionLine = `Mission: ${mission.missionNum || 'TBD'} | Tail: ${mission.tailNum || 'TBD'}`;
+    lines.unshift(missionLine);
+
+    let contentWidth = 0;
+    lines.forEach(line => {
+        contentWidth = Math.max(contentWidth, measureTooltipTextWidth(line));
+    });
+
+    const horizontalPadding = 24;
+    const borderAllowance = 2;
+    const targetWidth = Math.ceil(contentWidth + horizontalPadding + borderAllowance);
+    const maxWidth = Math.max(280, document.documentElement.clientWidth - 24);
+
+    tooltip.style.width = `${Math.min(targetWidth, maxWidth)}px`;
+}
+
+function parseCsvLine(line) {
+    const values = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+
+        if (inQuotes) {
+            if (char === '"') {
+                if (line[i + 1] === '"') {
+                    current += '"';
+                    i++;
+                } else {
+                    inQuotes = false;
+                }
+            } else {
+                current += char;
+            }
+            continue;
+        }
+
+        if (char === '"') {
+            inQuotes = true;
+        } else if (char === ',') {
+            values.push(current);
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+
+    values.push(current);
+    return values;
+}
+
+function loadAirportData() {
+    if (airportDataPromise) return airportDataPromise;
+
+    airportDataPromise = fetch('https://raw.githubusercontent.com/davidmegginson/ourairports-data/main/airports.csv')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Airport CSV request failed with status ${response.status}`);
+            }
+            return response.text();
+        })
+        .then(text => {
+            const lines = text.replace(/\r/g, '').split('\n').filter(line => line.trim() !== '');
+            if (lines.length === 0) {
+                throw new Error('Airport CSV was empty.');
+            }
+
+            const headers = parseCsvLine(lines[0]).map(header => header.trim().toLowerCase());
+            const identIndex = headers.indexOf('ident');
+            const latIndex = headers.indexOf('latitude_deg');
+            const lonIndex = headers.indexOf('longitude_deg');
+            const nameIndex = headers.indexOf('name');
+
+            if (identIndex === -1 || latIndex === -1 || lonIndex === -1) {
+                throw new Error('Airport CSV missing expected columns.');
+            }
+
+            const nextAirportData = {};
+
+            for (let i = 1; i < lines.length; i++) {
+                const cols = parseCsvLine(lines[i]);
+                const ident = normalizeIcao(cols[identIndex]);
+                const lat = parseFloat(cols[latIndex]);
+                const lon = parseFloat(cols[lonIndex]);
+                const name = nameIndex !== -1 ? (cols[nameIndex] || '').trim() : '';
+
+                if (ident && Number.isFinite(lat) && Number.isFinite(lon)) {
+                    nextAirportData[ident] = { lat, lon, name };
+                }
+            }
+
+            airportData = nextAirportData;
+            return airportData;
+        })
+        .catch(error => {
+            airportDataPromise = null;
+            throw error;
+        });
+
+    return airportDataPromise;
+}
+
+function clearHoverRouteMap() {
+    hoverTooltipToken += 1;
+    if (hoverRouteMap) {
+        hoverRouteMap.remove();
+        hoverRouteMap = null;
+    }
+}
+
+function positionHoverTooltip(pageX, pageY) {
+    const padding = 12;
+    const offset = 16;
+    const tooltipWidth = tooltip.offsetWidth;
+    const tooltipHeight = tooltip.offsetHeight;
+    const viewportWidth = document.documentElement.clientWidth;
+    const viewportHeight = document.documentElement.clientHeight;
+    const minLeft = window.scrollX + padding;
+    const minTop = window.scrollY + padding;
+    const maxLeft = Math.max(minLeft, window.scrollX + viewportWidth - tooltipWidth - padding);
+    const maxTop = Math.max(minTop, window.scrollY + viewportHeight - tooltipHeight - padding);
+
+    let left = pageX + offset;
+    let top = pageY + offset;
+
+    if (left > maxLeft) left = pageX - tooltipWidth - offset;
+    if (top > maxTop) top = pageY - tooltipHeight - offset;
+
+    left = Math.min(Math.max(left, minLeft), maxLeft);
+    top = Math.min(Math.max(top, minTop), maxTop);
+
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+}
+
+function getMissionRouteCodes(mission) {
+    const legs = Array.isArray(mission.legs) ? [...mission.legs].sort((a, b) => getDateTimestamp(a.takeoffTime) - getDateTimestamp(b.takeoffTime)) : [];
+    const codes = [];
+
+    legs.forEach(leg => {
+        const takeoff = normalizeIcao(leg.takeoffIcao);
+        const landing = normalizeIcao(leg.landIcao);
+
+        if (takeoff && codes[codes.length - 1] !== takeoff) codes.push(takeoff);
+        if (landing && codes[codes.length - 1] !== landing) codes.push(landing);
+    });
+
+    return codes;
+}
+
+function buildMissionTooltipHTML(mission) {
+    const legs = Array.isArray(mission.legs) ? [...mission.legs].sort((a, b) => getDateTimestamp(a.takeoffTime) - getDateTimestamp(b.takeoffTime)) : [];
+    const routeLines = legs.length > 0
+        ? legs.map((leg, index) => {
+            const takeoffName = escapeHtml(getAirportDisplayName(leg.takeoffIcao));
+            const landName = escapeHtml(getAirportDisplayName(leg.landIcao));
+            const takeoffTime = escapeHtml(formatTooltipDateTime(leg.takeoffTime));
+            const landTime = escapeHtml(formatTooltipDateTime(leg.landTime));
+            return `<div class="tooltip-leg-line">Leg ${index + 1}: ${takeoffName} (${takeoffTime}) → ${landName} (${landTime})</div>`;
+        }).join('')
+        : '<div>No route legs available.</div>';
+
+    return `
+        <div class="tooltip-summary">
+            <div><strong>Mission:</strong> ${escapeHtml(mission.missionNum || 'TBD')} | <strong>Tail:</strong> ${escapeHtml(mission.tailNum || 'TBD')}</div>
+            <hr class="tooltip-separator">
+            <div class="tooltip-itinerary">${routeLines}</div>
+        </div>
+        <div class="tooltip-route-section">
+            <div id="hover-route-map-status" class="tooltip-route-status">Loading route map...</div>
+            <div id="hover-route-map" class="tooltip-route-map"></div>
+        </div>
+    `;
+}
+
+async function renderHoverRouteMap(mission, token) {
+    let routeMapEl = tooltip.querySelector('#hover-route-map');
+    let statusEl = tooltip.querySelector('#hover-route-map-status');
+    if (!routeMapEl || !statusEl) return;
+
+    if (typeof L === 'undefined') {
+        statusEl.textContent = 'Route map unavailable.';
+        routeMapEl.style.visibility = 'hidden';
+        return;
+    }
+
+    const routeCodes = getMissionRouteCodes(mission);
+    if (routeCodes.length < 2) {
+        statusEl.textContent = 'Route map unavailable for this mission.';
+        routeMapEl.style.visibility = 'hidden';
+        return;
+    }
+
+    routeMapEl.style.visibility = 'hidden';
+
+    try {
+        await loadAirportData();
+        if (token !== hoverTooltipToken) return;
+
+        tooltip.innerHTML = buildMissionTooltipHTML(mission);
+        setHoverTooltipWidth(mission);
+
+        routeMapEl = tooltip.querySelector('#hover-route-map');
+        statusEl = tooltip.querySelector('#hover-route-map-status');
+        if (!routeMapEl || !statusEl) return;
+
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        if (token !== hoverTooltipToken) return;
+
+        const routePoints = [];
+        const markerCodes = new Set();
+
+        routeCodes.forEach(code => {
+            const airport = airportData[code];
+            if (!airport) return;
+            routePoints.push([airport.lat, airport.lon]);
+        });
+
+        if (routePoints.length < 2) {
+            statusEl.textContent = 'Route map unavailable for this mission.';
+            routeMapEl.style.visibility = 'hidden';
+            return;
+        }
+
+        if (hoverRouteMap) {
+            hoverRouteMap.remove();
+            hoverRouteMap = null;
+        }
+
+        routeMapEl.innerHTML = '';
+        hoverRouteMap = L.map(routeMapEl, {
+            dragging: false,
+            zoomControl: false,
+            scrollWheelZoom: false,
+            doubleClickZoom: false,
+            boxZoom: false,
+            touchZoom: false,
+            keyboard: false,
+            tap: false,
+            attributionControl: false
+        });
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+            subdomains: 'abcd',
+            maxZoom: 19
+        }).addTo(hoverRouteMap);
+
+        const routeLayer = L.layerGroup().addTo(hoverRouteMap);
+
+        routeCodes.forEach(code => {
+            const airport = airportData[code];
+            if (!airport || markerCodes.has(code)) return;
+            markerCodes.add(code);
+            L.marker([airport.lat, airport.lon], {
+                icon: L.divIcon({
+                    className: 'route-icao-label',
+                    html: escapeHtml(code)
+                })
+            }).addTo(routeLayer);
+        });
+
+        L.polyline(routePoints, { color: '#d71920', weight: 4 }).addTo(routeLayer);
+        hoverRouteMap.fitBounds(routePoints, { padding: [18, 18] });
+
+        routeMapEl.style.visibility = 'visible';
+        statusEl.textContent = '';
+
+        hoverRouteMap.invalidateSize();
+        positionHoverTooltip(hoverTooltipPosition.x, hoverTooltipPosition.y);
+    } catch (error) {
+        if (token !== hoverTooltipToken) return;
+        console.error('Failed to render route map', error);
+        statusEl.textContent = 'Route map unavailable.';
+        routeMapEl.style.visibility = 'hidden';
+        if (hoverRouteMap) {
+            hoverRouteMap.remove();
+            hoverRouteMap = null;
+        }
+    }
+}
+
+function showMissionTooltip(mission, event) {
+    clearHoverRouteMap();
+    hoverTooltipPosition = { x: event.pageX, y: event.pageY };
+    const token = hoverTooltipToken;
+
+    tooltip.innerHTML = buildMissionTooltipHTML(mission);
+    tooltip.style.display = 'flex';
+    setHoverTooltipWidth(mission);
+    positionHoverTooltip(event.pageX, event.pageY);
+    renderHoverRouteMap(mission, token);
 }
 
 function getMissionHomeField() {
@@ -140,6 +510,7 @@ function init() {
 
     snapToFourteenDayOutlook();
     addDummyData();
+    void loadAirportData().catch(() => {});
 }
 
 function snapToCurrentMonth() {
@@ -490,29 +861,26 @@ function renderTimeline() {
             bar.innerHTML = `<span>${mission.missionNum} (${firstIcao}&rarr;${lastIcao})</span>`;
 
         bar.addEventListener('mouseenter', (e) => {
-            tooltip.style.display = 'block';
-            let itineraryHTML = mission.legs.map((l, i) => 
-                `Leg ${i+1}: ${l.takeoffIcao} (${l.takeoffTime.toLocaleString()}) &rarr; ${l.landIcao} (${l.landTime.toLocaleString()})`
-            ).join('<br>');
+            showMissionTooltip(mission, e);
 
-            tooltip.innerHTML = `
-                <strong>Mission:</strong> ${mission.missionNum} | <strong>Tail:</strong> ${mission.tailNum}<br>
-                <hr class="tooltip-separator">
-                ${itineraryHTML}
-            `;
-            
             const card = document.getElementById(`card-${mission.id}`);
-            if(card) { card.classList.add('highlight'); card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+            if (card) {
+                card.classList.add('highlight');
+            }
         });
 
-        bar.addEventListener('mousemove', (e) => tooltip.style.cssText = `display: block; left: ${e.pageX + 15}px; top: ${e.pageY + 15}px;`);
+        bar.addEventListener('mousemove', (e) => {
+            hoverTooltipPosition = { x: e.pageX, y: e.pageY };
+            positionHoverTooltip(e.pageX, e.pageY);
+        });
         bar.addEventListener('mouseleave', () => {
             tooltip.style.display = 'none';
+            clearHoverRouteMap();
             const card = document.getElementById(`card-${mission.id}`);
             if(card) card.classList.remove('highlight');
         });
 
-        bar.addEventListener('click', () => openEditModal(mission));
+        bar.addEventListener('click', () => focusMissionCard(mission.id));
         missionsContainer.appendChild(bar);
     });
 }
@@ -604,6 +972,14 @@ function locateMission(id, event) {
 
     renderTimeline();
     document.getElementById('timeline-viewport').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function focusMissionCard(id) {
+    const card = document.getElementById(`card-${id}`);
+    if (!card) return;
+
+    card.classList.add('highlight');
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function deleteMission(id, event) {
