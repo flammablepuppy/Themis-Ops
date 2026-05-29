@@ -1,0 +1,242 @@
+﻿:root {
+        --primary: #0056b3;
+        --primary-hover: #004494;
+        --bg-color: #f4f7f6;
+        --card-bg: #ffffff;
+        --text-main: #333333;
+        --text-muted: #666666;
+        --border-color: #dddddd;
+        --timeline-bar: #28a745;
+        --grid-line: #e0e0e0;
+        --grid-line-sub: #f0f0f0;
+        --highlight: #ffc107;
+        --highlight-bg: #fffbeb;
+        --alert-bg: #fff0f0;
+        --alert-border: #e83e8c;
+        --danger: #dc3545;
+        --info: #17a2b8;
+        --info-hover: #138496;
+        --past-bar: #999999;
+        --past-bar-hover: #808080;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    body { background-color: var(--bg-color); color: var(--text-main); padding: 20px; }
+    
+    /* Updated to dynamically scale to 95% width of the viewport */
+    .container { width: 95%; max-width: none; margin: 0 auto; }
+
+    .card { background-color: var(--card-bg); border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 2px solid var(--primary); padding-bottom: 10px; flex-wrap: wrap; gap: 10px;}
+    h2 { color: var(--primary); }
+
+    /* Timeline Controls & Viewport Layout */
+    .fy-controls { display: flex; align-items: center; gap: 10px; font-weight: bold; flex-wrap: wrap;}
+    .fy-controls input { width: 80px; padding: 5px; border: 1px solid var(--border-color); border-radius: 4px; text-align: center; }
+    
+    .timeline-wrapper {
+        display: flex;
+        align-items: stretch;
+        background: #fafafa;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .timeline-sidebar {
+        width: 110px;
+        background: rgba(255,255,255,0.98);
+        border-right: 1px solid #bbb;
+        z-index: 40;
+        position: relative;
+        flex-shrink: 0;
+    }
+
+    .sidebar-header {
+        height: 72px; /* Matches years (38) + months (34) height */
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        background: #fff;
+    }
+
+    #timeline-labels {
+        position: relative;
+        top: 32px; /* Offsets down to match #timeline-missions placement */
+    }
+
+    #timeline-viewport { 
+        flex: 1;
+        position: relative; 
+        min-height: 250px; 
+        overflow: hidden; 
+        cursor: grab; 
+        user-select: none; 
+        transition: height 0.2s ease;
+    }
+    #timeline-viewport:active { cursor: grabbing; }
+
+    #timeline-grid, #timeline-missions, #timeline-months { position: absolute; left: 0; width: 100%; }
+    #timeline-years {
+        position: absolute; left: 0; width: 100%; top: 0; height: 38px;
+        pointer-events: auto; z-index: 25; overflow: hidden;
+        background: rgba(255,255,255,0.98); border-bottom: 1px solid #bbb;
+    }
+
+    #timeline-months {
+        top: 38px; height: 34px; pointer-events: auto; z-index: 20;
+        background: linear-gradient(to bottom, rgba(250,250,250,0.98), rgba(250,250,250,0.9)); 
+        overflow: hidden; border-bottom: 1px solid var(--border-color);
+    }
+    
+    #timeline-grid { top: 72px; height: calc(100% - 72px); pointer-events: none; z-index: 1; }
+    #timeline-missions { top: 104px; height: calc(100% - 104px); pointer-events: auto; z-index: 5; }
+
+    /* Grid Markers */
+    .grid-marker { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--grid-line); display: flex; flex-direction: column; pointer-events: none; }
+    .grid-marker.day { border-left: 1px solid var(--grid-line-sub); }
+    .grid-label { padding: 4px; font-size: 0.75rem; color: var(--text-muted); font-weight: bold; white-space: nowrap; cursor: pointer; border-radius: 0 0 4px 0;}
+    .grid-label.day-label { font-weight: normal; font-size: 0.65rem; color: #999; }
+
+    .day-divider-line {
+        position: absolute;
+        top: 24px;
+        left: 0;
+        width: 100%;
+        height: 1px;
+        background-color: var(--border-color);
+        z-index: 2;
+        pointer-events: none;
+    }
+
+    .month-marker { position: absolute; top: 0; bottom: 0; border-left: 2px solid var(--primary); }
+    .fy-marker { position: absolute; top: 0; bottom: 0; border-left: 4px solid #000; z-index: 3; }
+    .week-marker { position: absolute; top: 0; bottom: 0; border-left: 1px dashed #7aa7d9; }
+    .today-highlight { position: absolute; top: 0; bottom: 0; background: rgba(173, 216, 230, 0.25); z-index: 0; pointer-events: none; }
+    .current-time-line { position: absolute; top: 56px; bottom: 0; border-left: 2px dotted #007bff; z-index: 30; pointer-events: none; }
+
+    .year-label {
+        z-index: 35; position: absolute; top: 6px; background: rgba(255,255,255,0.98); padding: 4px 14px;
+        border-radius: 12px; border: 2px solid #000; font-size: 0.85rem; font-weight: 800; color: #000;
+        white-space: nowrap; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    }
+
+    .month-label {
+        z-index: 30; position: absolute; top: 4px; transform: translateX(-50%); background: rgba(255,255,255,0.95);
+        padding: 2px 10px; border-radius: 12px; border: 1px solid var(--border-color); font-size: 0.8rem;
+        font-weight: 700; color: var(--primary); white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    /* Tail Row & Label Styling */
+    .timeline-row-line {
+        position: absolute; left: 0; width: 100%; height: 1px;
+        background-color: var(--grid-line); z-index: 1; pointer-events: none;
+    }
+    
+    .tail-label {
+        position: absolute; left: 0; width: 100%; height: 30px; line-height: 30px;
+        text-align: center; font-size: 0.9rem; font-weight: bold; color: var(--primary);
+        pointer-events: none;
+    }
+
+    /* Mission Bars & Tooltip */
+    .timeline-bar {
+        position: absolute; height: 30px; background-color: var(--timeline-bar); border-radius: 4px;
+        display: flex; align-items: center; padding: 0 10px; color: white; font-weight: bold; font-size: 0.8rem;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        cursor: pointer; transition: background-color 0.2s, transform 0.1s; z-index: 10;
+    }
+    .timeline-bar:hover { background-color: #218838; transform: scaleY(1.1); z-index: 15; }
+    
+    .timeline-bar.past { background-color: var(--past-bar); }
+    .timeline-bar.past:hover { background-color: var(--past-bar-hover); }
+    .timeline-bar.unassigned-crew { border: 2.5px solid var(--danger); }
+
+.tooltip {
+            position: absolute; display: none; background: rgba(0, 0, 0, 0.85); color: white;
+            padding: 12px; border-radius: 6px; font-size: 0.85rem; pointer-events: none;
+            z-index: 2000; box-shadow: 0 4px 6px rgba(0,0,0,0.3); line-height: 1.4; white-space: nowrap;
+        }
+        .tooltip strong { color: var(--highlight); }
+        .tooltip-separator { margin: 5px 0; border-color: #555; }
+
+    /* Buttons */
+    .btn { background-color: var(--primary); color: white; border: none; padding: 8px 16px; font-size: 0.9rem; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; }
+    .btn:hover { background-color: var(--primary-hover); }
+    .btn-small { padding: 4px 8px; font-size: 0.8rem; }
+    .btn-remove-leg { background-color: var(--danger); transition: background-color 0.2s; color: white; border: none; cursor: pointer; border-radius: 4px;}
+    .btn-remove-leg:hover { background-color: #c82333; }
+    
+    .btn-delete { background-color: transparent; color: var(--danger); border: 1px solid var(--danger); padding: 6px 10px; font-size: 0.8rem; border-radius: 4px; cursor: pointer; transition: all 0.2s; width: 100%; font-weight: bold; }
+    .btn-delete:hover { background-color: var(--danger); color: white; }
+    
+    .btn-locate { background-color: var(--info); color: white; border: none; padding: 6px 10px; font-size: 0.8rem; border-radius: 4px; cursor: pointer; transition: all 0.2s; width: 100%; font-weight: bold; }
+    .btn-locate:hover { background-color: var(--info-hover); }
+
+.controls { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
+.fy-divider { color: #ccc; }
+.timeline-tip { text-align: center; font-size: 0.8rem; color: #666; margin-top: 10px; }
+.hidden-file-input { display: none; }
+.csv-hint { font-size: 0.8rem; color: var(--text-muted); }
+
+    /* Mission List 4-Column Layout */
+    .mission-list-container { display: flex; flex-direction: column; gap: 15px; }
+    .mission-highlight { outline: 3px solid #1e88e5; box-shadow: 0 0 14px rgba(30,136,229,0.45); transition: all 0.25s ease; }
+
+    .mission-card {
+        display: flex; gap: 15px; background: var(--card-bg); border-left: 5px solid var(--primary);
+        padding: 15px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); cursor: pointer; transition: all 0.2s ease-in-out;
+    }
+    .mission-card:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.15); transform: translateY(-2px); }
+    .mission-card.highlight { border-left-color: var(--highlight); background-color: var(--highlight-bg); box-shadow: 0 4px 12px rgba(255, 193, 7, 0.3); }
+    .mission-card.no-crew { background-color: var(--alert-bg); border-left-color: var(--alert-border); }
+
+    .card-col { flex: 1; border-right: 1px dashed var(--border-color); padding-right: 12px; }
+    .card-col:last-child { border-right: none; padding-right: 0; }
+    
+    .col-mission { flex: 1.5; }
+    .col-crew { flex: 1; }
+    .col-lift { flex: 1; }
+    .col-buttons { flex: 0.5; display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: stretch; padding-left: 10px; }
+
+    .mission-header h3 { margin: 0; display: flex; align-items: center; font-size: 1.1rem; margin-bottom: 8px;}
+    .status-check { color: #28a745; margin-right: 6px; font-size: 1.1rem; }
+    .edit-hint { font-size: 0.75rem; color: var(--text-muted); font-style: italic; display: block; margin-top: 8px; }
+
+    .mission-details, .crew-section, .lift-section { font-size: 0.85rem; line-height: 1.5; }
+    .card-col h4 { margin-bottom: 8px; color: var(--primary); font-size: 0.9rem; border-bottom: 1px solid #eee; padding-bottom: 3px; }
+    .itinerary-list { margin-top: 6px; padding-left: 15px; font-size: 0.8rem; color: #444; }
+    .itinerary-list li { margin-bottom: 4px; }
+
+    @media (max-width: 992px) {
+        .mission-card { flex-direction: column; gap: 12px; }
+        .card-col { border-right: none; border-bottom: 1px dashed var(--border-color); padding-right: 0; padding-bottom: 12px; }
+        .card-col:last-child { border-bottom: none; padding-bottom: 0; }
+        .col-buttons { flex-direction: row; }
+    }
+
+    /* Modal Styles */
+    .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); overflow-y: auto; }
+    .modal-content { background-color: var(--card-bg); margin: 5% auto; padding: 25px; border-radius: 8px; width: 90%; max-width: 770px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+    .close { float: right; font-size: 1.5rem; font-weight: bold; cursor: pointer; color: var(--text-muted); }
+    .close:hover { color: var(--text-main); }
+    form label { display: block; margin-top: 10px; font-weight: bold; font-size: 0.9rem; }
+    form input { width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; }
+        .form-row { display: flex; gap: 15px; }
+        .form-col { flex: 1; }
+        .form-section-title { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; margin-bottom: 15px; font-size: 1.1rem; color: var(--primary); border-bottom: 1px solid var(--border-color); padding-bottom: 5px;}
+        .leg-container { background: #f9f9f9; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 10px; }
+        .mission-tail-line { margin-bottom: 5px; }
+        .leg-row { align-items: flex-end; gap: 8px; }
+        .leg-col-short { flex: 0.8; }
+        .leg-col-wide { flex: 1.5; }
+        .leg-label { font-size: 0.8rem; }
+        .leg-remove-btn { margin: 0 0 2px 0; height: 33px; padding: 0 12px; font-weight: bold; }
+        .submit-btn { margin-top: 25px; width: 100%; font-size: 1.1rem; padding: 12px; background-color: var(--timeline-bar); }
+        .submit-btn:hover { background-color: #218838; }
