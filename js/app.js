@@ -12,12 +12,131 @@ const tooltip = document.getElementById('hover-tooltip');
 const modal = document.getElementById('mission-modal');
 const missionForm = document.getElementById('mission-form');
 const legsWrapper = document.getElementById('legs-wrapper');
+const missionDefaultsForm = document.getElementById('mission-defaults-form');
+const missionHomeFieldInput = document.getElementById('defaultHomeField');
+const DEFAULTS_STORAGE_KEY = 'themis-ops-mission-defaults';
+let missionDefaults = createEmptyMissionDefaults();
+const tabButtons = document.querySelectorAll('.app-tab');
+
+function createEmptyMissionDefaults() {
+    return {
+        homeField: ''
+    };
+}
+
+function loadMissionDefaults() {
+    try {
+        const raw = localStorage.getItem(DEFAULTS_STORAGE_KEY);
+        if (!raw) return createEmptyMissionDefaults();
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return createEmptyMissionDefaults();
+        const homeField = typeof parsed.homeField === 'string' ? parsed.homeField : '';
+        const legacyHomeField = typeof parsed.tailNum === 'string' ? parsed.tailNum : '';
+        return {
+            homeField: (homeField || legacyHomeField).trim()
+        };
+    } catch {
+        return createEmptyMissionDefaults();
+    }
+}
+
+function persistMissionDefaults() {
+    try {
+        localStorage.setItem(DEFAULTS_STORAGE_KEY, JSON.stringify(missionDefaults));
+    } catch {
+        // Ignore storage failures in file:// or restricted browser contexts.
+    }
+}
+
+function syncMissionDefaultsForm() {
+    if (missionHomeFieldInput) missionHomeFieldInput.value = missionDefaults.homeField ?? '';
+}
+
+function readMissionDefaultsForm() {
+    return {
+        homeField: missionHomeFieldInput ? missionHomeFieldInput.value.trim() : ''
+    };
+}
+
+function getMissionHomeField() {
+    return (missionDefaults.homeField || '').trim().toUpperCase();
+}
+
+function createDateTimeLocal(daysAhead, hour, minute) {
+    const date = new Date();
+    date.setDate(date.getDate() + daysAhead);
+    date.setHours(hour, minute, 0, 0);
+    return date;
+}
+
+function parseDateTimeLocalValue(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getInitialLegDefaults() {
+    const homeField = getMissionHomeField();
+    const takeoffTime = createDateTimeLocal(1, 9, 0);
+    const landTime = createDateTimeLocal(1, 12, 30);
+
+    return {
+        takeoffIcao: homeField,
+        takeoffTime,
+        landIcao: homeField,
+        landTime
+    };
+}
+
+function getNextLegDefaults() {
+    const legNodes = legsWrapper.querySelectorAll('.leg-container');
+    if (legNodes.length === 0) return getInitialLegDefaults();
+
+    const previousLeg = legNodes[legNodes.length - 1];
+    const previousLandIcaoInput = previousLeg.querySelector('.leg-ld-icao');
+    const previousLandTimeInput = previousLeg.querySelector('.leg-ld-time');
+    const previousLandTime = parseDateTimeLocalValue(previousLandTimeInput ? previousLandTimeInput.value : '');
+
+    const takeoffIcao = previousLandIcaoInput ? previousLandIcaoInput.value.trim().toUpperCase() : '';
+    const takeoffTime = previousLandTime ? new Date(previousLandTime) : createDateTimeLocal(1, 9, 0);
+    if (previousLandTime) takeoffTime.setDate(takeoffTime.getDate() + 1);
+
+    const landTime = new Date(takeoffTime);
+    landTime.setMinutes(landTime.getMinutes() + 210);
+
+    return {
+        takeoffIcao,
+        takeoffTime,
+        landIcao: '',
+        landTime
+    };
+}
+
+function activateTab(panelId) {
+    tabButtons.forEach(button => {
+        const isActive = button.dataset.tab === panelId;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+
+    document.querySelectorAll('.tab-panel').forEach(panel => {
+        const isActive = panel.id === panelId;
+        panel.hidden = !isActive;
+    });
+
+    if (panelId === 'timeline-panel') {
+        renderTimeline();
+    }
+}
 
 function init() {
     const now = new Date();
     let currentFY = now.getFullYear();
     if (now.getMonth() >= 9) currentFY += 1; 
     document.getElementById('fy-input').value = currentFY;
+
+    missionDefaults = loadMissionDefaults();
+    syncMissionDefaultsForm();
 
     snapToFourteenDayOutlook();
     addDummyData();
@@ -66,6 +185,9 @@ document.getElementById('btn-snap-month').addEventListener('click', snapToCurren
 document.getElementById('btn-snap-7day').addEventListener('click', snapToSevenDayOutlook);
 document.getElementById('btn-snap-14day').addEventListener('click', snapToFourteenDayOutlook);
 document.getElementById('btn-snap-fy').addEventListener('click', () => snapToFY(parseInt(document.getElementById('fy-input').value, 10)));
+tabButtons.forEach(button => {
+    button.addEventListener('click', () => activateTab(button.dataset.tab));
+});
 
 // Zoom & Pan functionality
 viewport.addEventListener('wheel', (e) => {
@@ -556,6 +678,22 @@ document.getElementById('csv-file-input').addEventListener('change', function(e)
 });
 
 document.getElementById('btn-export-csv').addEventListener('click', exportMissionsToCSV);
+missionDefaultsForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    missionDefaults = readMissionDefaultsForm();
+    persistMissionDefaults();
+});
+
+missionDefaultsForm.addEventListener('input', () => {
+    missionDefaults = readMissionDefaultsForm();
+    persistMissionDefaults();
+});
+
+document.getElementById('btn-clear-defaults').addEventListener('click', () => {
+    missionDefaults = createEmptyMissionDefaults();
+    persistMissionDefaults();
+    syncMissionDefaultsForm();
+});
 
 function toDateTimeLocal(date) {
     const pad = n => n < 10 ? '0' + n : n;
@@ -694,12 +832,13 @@ function exportMissionsToCSV() {
 function addLegRow(legData = null) {
     const div = document.createElement('div');
     div.className = 'leg-container';
+    const defaultLegData = legData || getNextLegDefaults();
     div.innerHTML = `
         <div class="form-row leg-row">
-            <div class="form-col leg-col-short"><label class="leg-label">TK ICAO</label><input type="text" class="leg-tk-icao" required maxlength="4" value="${legData ? legData.takeoffIcao : ''}"></div>
-            <div class="form-col leg-col-wide"><label class="leg-label">Takeoff Time</label><input type="datetime-local" class="leg-tk-time" required value="${legData ? toDateTimeLocal(legData.takeoffTime) : ''}"></div>
-            <div class="form-col leg-col-short"><label class="leg-label">LD ICAO</label><input type="text" class="leg-ld-icao" required maxlength="4" value="${legData ? legData.landIcao : ''}"></div>
-            <div class="form-col leg-col-wide"><label class="leg-label">Land Time</label><input type="datetime-local" class="leg-ld-time" required value="${legData ? toDateTimeLocal(legData.landTime) : ''}"></div>
+            <div class="form-col leg-col-short"><label class="leg-label">Origin</label><input type="text" class="leg-tk-icao" required maxlength="4" value="${defaultLegData.takeoffIcao || ''}"></div>
+            <div class="form-col leg-col-wide"><label class="leg-label">Takeoff Time</label><input type="datetime-local" class="leg-tk-time" required value="${toDateTimeLocal(defaultLegData.takeoffTime)}"></div>
+            <div class="form-col leg-col-short"><label class="leg-label">Destination</label><input type="text" class="leg-ld-icao" required maxlength="4" value="${defaultLegData.landIcao || ''}"></div>
+            <div class="form-col leg-col-wide"><label class="leg-label">Land Time</label><input type="datetime-local" class="leg-ld-time" required value="${toDateTimeLocal(defaultLegData.landTime)}"></div>
             <div><button type="button" class="btn btn-remove-leg leg-remove-btn" title="Remove Leg">&times;</button></div>
         </div>
     `;
@@ -752,8 +891,8 @@ missionForm.addEventListener('submit', function(e) {
     let timeValid = true;
 
     legNodes.forEach(node => {
-        const tkIcao = node.querySelector('.leg-tk-icao').value.toUpperCase();
-        const ldIcao = node.querySelector('.leg-ld-icao').value.toUpperCase();
+        const tkIcao = node.querySelector('.leg-tk-icao').value.trim().toUpperCase();
+        const ldIcao = node.querySelector('.leg-ld-icao').value.trim().toUpperCase();
         const tkTime = new Date(node.querySelector('.leg-tk-time').value);
         const ldTime = new Date(node.querySelector('.leg-ld-time').value);
 

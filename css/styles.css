@@ -26,6 +26,40 @@
     /* Updated to dynamically scale to 95% width of the viewport */
     .container { width: 95%; max-width: none; margin: 0 auto; }
 
+    .app-tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 15px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .app-tab {
+        background: transparent;
+        color: var(--text-muted);
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 10px 14px;
+        border-radius: 4px 4px 0 0;
+        font-size: 0.95rem;
+        font-weight: 700;
+        cursor: pointer;
+        transition: color 0.2s, background-color 0.2s, border-color 0.2s;
+    }
+
+    .app-tab:hover {
+        color: var(--primary);
+        background: rgba(255, 255, 255, 0.6);
+    }
+
+    .app-tab.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+        background: #fff;
+    }
+
+    .tab-panel { margin-bottom: 20px; }
+    .tab-panel[hidden] { display: none !important; }
+
     .card { background-color: var(--card-bg); border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; }
     .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 2px solid var(--primary); padding-bottom: 10px; flex-wrap: wrap; gap: 10px;}
     h2 { color: var(--primary); }
@@ -229,9 +263,12 @@
     .close:hover { color: var(--text-main); }
     form label { display: block; margin-top: 10px; font-weight: bold; font-size: 0.9rem; }
     form input { width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; }
-        .form-row { display: flex; gap: 15px; }
-        .form-col { flex: 1; }
+    .form-row { display: flex; gap: 15px; }
+    .form-col { flex: 1; }
         .form-section-title { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; margin-bottom: 15px; font-size: 1.1rem; color: var(--primary); border-bottom: 1px solid var(--border-color); padding-bottom: 5px;}
+        .defaults-form .form-row { flex-wrap: wrap; }
+        .defaults-form .form-col { flex: 1 1 160px; }
+        .defaults-form .submit-btn { margin-top: 20px; }
         .leg-container { background: #f9f9f9; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 10px; }
         .mission-tail-line { margin-bottom: 5px; }
         .leg-row { align-items: flex-end; gap: 8px; }
