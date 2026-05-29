@@ -242,17 +242,42 @@
             color: #d9e2ef;
             font-size: 0.75rem;
         }
-        .route-icao-label {
+        .leaflet-marker-icon.route-icao-label {
             font-weight: 800;
             color: #000;
             font-size: 11px;
             line-height: 1.1;
             white-space: nowrap;
-            background: rgba(255, 255, 255, 0.96);
-            padding: 1px 4px;
-            border: 1px solid #bbb;
-            border-radius: 3px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+            background: transparent;
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
+            pointer-events: none;
+            text-shadow: 0 0 2px rgba(255, 255, 255, 0.95), 0 0 2px rgba(255, 255, 255, 0.95);
+        }
+        .route-direction-marker {
+            background: transparent;
+            border: none;
+            pointer-events: none;
+        }
+        .route-direction-arrow {
+            width: 20px;
+            height: 16px;
+            display: block;
+            overflow: visible;
+            pointer-events: none;
+            user-select: none;
+        }
+        .route-direction-arrow-shaft {
+            fill: none;
+            stroke: #d71920;
+            stroke-width: 2.2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .route-direction-arrow-head {
+            fill: #d71920;
         }
 
     /* Buttons */
@@ -320,9 +345,11 @@
     .form-row { display: flex; gap: 15px; }
     .form-col { flex: 1; }
         .form-section-title { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; margin-bottom: 15px; font-size: 1.1rem; color: var(--primary); border-bottom: 1px solid var(--border-color); padding-bottom: 5px;}
-        .defaults-form .form-row { flex-wrap: wrap; }
-        .defaults-form .form-col { flex: 1 1 160px; }
-        .defaults-form .submit-btn { margin-top: 20px; }
+.defaults-form .form-row { flex-wrap: wrap; }
+.defaults-form .form-col { flex: 1 1 160px; }
+.mission-path-picker { display: flex; gap: 8px; align-items: center; }
+.mission-path-picker input { flex: 1 1 auto; min-width: 0; width: auto; }
+.defaults-form .submit-btn { margin-top: 20px; }
         .leg-container { background: #f9f9f9; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 10px; }
         .mission-tail-line { margin-bottom: 5px; }
         .leg-row { align-items: flex-end; gap: 8px; }

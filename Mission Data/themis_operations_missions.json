@@ -1,0 +1,56 @@
+[
+  {
+    "id": 1780095892155,
+    "missionNum": "CNV42069",
+    "tailNum": "695",
+    "pilot": "",
+    "copilot": "",
+    "crewChief": "",
+    "loadmaster": "",
+    "liftCustomer": "DEVGRU",
+    "liftPax": "30",
+    "liftCargo": "2000",
+    "liftHazmat": "Yes",
+    "legs": [
+      {
+        "takeoffIcao": "KNUW",
+        "takeoffTime": "2026-05-30T16:00:00.000Z",
+        "landIcao": "KSLC",
+        "landTime": "2026-05-30T19:30:00.000Z"
+      },
+      {
+        "takeoffIcao": "KSLC",
+        "takeoffTime": "2026-05-30T20:30:00.000Z",
+        "landIcao": "KNZY",
+        "landTime": "2026-05-30T23:30:00.000Z"
+      },
+      {
+        "takeoffIcao": "KNZY",
+        "takeoffTime": "2026-06-01T16:00:00.000Z",
+        "landIcao": "KNUW",
+        "landTime": "2026-06-01T19:30:00.000Z"
+      }
+    ]
+  },
+  {
+    "id": 1780096282842,
+    "missionNum": "CNV4444",
+    "tailNum": "834",
+    "pilot": "",
+    "copilot": "",
+    "crewChief": "",
+    "loadmaster": "",
+    "liftCustomer": "",
+    "liftPax": "",
+    "liftCargo": "",
+    "liftHazmat": "",
+    "legs": [
+      {
+        "takeoffIcao": "KNUW",
+        "takeoffTime": "2026-06-01T16:00:00.000Z",
+        "landIcao": "KPNS",
+        "landTime": "2026-06-01T19:30:00.000Z"
+      }
+    ]
+  }
+]

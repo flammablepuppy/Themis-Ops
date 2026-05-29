@@ -20,9 +20,9 @@
             <div class="card-header">
                 <h2>Mission Timeline</h2>
                 <div class="fy-controls">
-                    <button class="btn" id="btn-snap-month">Snap to Current Month</button>
                     <button class="btn" id="btn-snap-7day">7-Day Outlook</button>
                     <button class="btn" id="btn-snap-14day">14-Day Outlook</button>
+                    <button class="btn" id="btn-snap-30day">30-Day Outlook</button>
                     <span class="fy-divider">|</span>
                     <label for="fy-input">FY:</label>
                     <input type="number" id="fy-input">
@@ -69,6 +69,15 @@
             <form id="mission-defaults-form" class="defaults-form">
                 <div class="form-row">
                     <div class="form-col"><label>Home Field</label><input type="text" id="defaultHomeField"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-col">
+                        <label>Mission Data Path</label>
+                        <div class="mission-path-picker">
+                            <input type="text" id="defaultMissionDataPath" placeholder="themis_missions.json">
+                            <button type="button" class="btn btn-small" id="btn-choose-mission-data-file">Choose</button>
+                        </div>
+                    </div>
                 </div>
                 <button type="submit" class="btn submit-btn">Save Defaults</button>
             </form>

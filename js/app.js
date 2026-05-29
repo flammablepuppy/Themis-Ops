@@ -1,6 +1,7 @@
 ﻿﻿let missions = [];
 let viewStart, viewEnd; 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const MS_PER_HOUR = 60 * 60 * 1000;
 
 const viewport = document.getElementById('timeline-viewport');
 const gridContainer = document.getElementById('timeline-grid');
@@ -14,7 +15,12 @@ const missionForm = document.getElementById('mission-form');
 const legsWrapper = document.getElementById('legs-wrapper');
 const missionDefaultsForm = document.getElementById('mission-defaults-form');
 const missionHomeFieldInput = document.getElementById('defaultHomeField');
+const missionDataPathInput = document.getElementById('defaultMissionDataPath');
 const DEFAULTS_STORAGE_KEY = 'themis-ops-mission-defaults';
+const MISSIONS_STORAGE_KEY = 'themis-ops-missions';
+const MISSION_DATA_HANDLE_DB_NAME = 'themis-ops-mission-data';
+const MISSION_DATA_HANDLE_STORE_NAME = 'handles';
+const MISSION_DATA_HANDLE_KEY = 'mission-data-handle';
 let missionDefaults = createEmptyMissionDefaults();
 const tabButtons = document.querySelectorAll('.app-tab');
 let airportData = {};
@@ -22,12 +28,24 @@ let airportDataPromise = null;
 let hoverRouteMap = null;
 let hoverTooltipToken = 0;
 let hoverTooltipPosition = { x: 0, y: 0 };
+let activeTooltipMissionId = null;
 let tooltipMeasureCtx = null;
 let tooltipMeasureFont = '';
+const ROUTE_AIRPORT_DOT_RADIUS_PX = 4;
+const ROUTE_AIRPORT_DOT_WEIGHT_PX = 1;
+const ROUTE_AIRPORT_DOT_EDGE_PX = ROUTE_AIRPORT_DOT_RADIUS_PX + (ROUTE_AIRPORT_DOT_WEIGHT_PX / 2);
+let editingMissionId = null;
+let editingMissionBackup = null;
+let missionDataFileHandle = null;
+let missionDataFileHandleLoadPromise = null;
+let missionDataFileWriteQueue = Promise.resolve();
+let missionDataFileHandleDisabled = false;
+let missionDataFileHandleLoadToken = 0;
 
 function createEmptyMissionDefaults() {
     return {
-        homeField: ''
+        homeField: '',
+        missionDataPath: ''
     };
 }
 
@@ -38,9 +56,11 @@ function loadMissionDefaults() {
         const parsed = JSON.parse(raw);
         if (!parsed || typeof parsed !== 'object') return createEmptyMissionDefaults();
         const homeField = typeof parsed.homeField === 'string' ? parsed.homeField : '';
+        const missionDataPath = typeof parsed.missionDataPath === 'string' ? parsed.missionDataPath : '';
         const legacyHomeField = typeof parsed.tailNum === 'string' ? parsed.tailNum : '';
         return {
-            homeField: (homeField || legacyHomeField).trim()
+            homeField: (homeField || legacyHomeField).trim(),
+            missionDataPath: missionDataPath.trim()
         };
     } catch {
         return createEmptyMissionDefaults();
@@ -57,12 +77,300 @@ function persistMissionDefaults() {
 
 function syncMissionDefaultsForm() {
     if (missionHomeFieldInput) missionHomeFieldInput.value = missionDefaults.homeField ?? '';
+    if (missionDataPathInput) missionDataPathInput.value = missionDefaults.missionDataPath ?? '';
 }
 
 function readMissionDefaultsForm() {
     return {
-        homeField: missionHomeFieldInput ? missionHomeFieldInput.value.trim() : ''
+        homeField: missionHomeFieldInput ? missionHomeFieldInput.value.trim() : '',
+        missionDataPath: missionDataPathInput ? missionDataPathInput.value.trim() : ''
     };
+}
+
+function getMissionDataFileName(pathValue) {
+    const trimmed = (pathValue || '').trim();
+    if (!trimmed) return 'themis_operations_missions.json';
+
+    const parts = trimmed.split(/[\\/]/).filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : 'themis_operations_missions.json';
+}
+
+function supportsMissionDataFileAccess() {
+    return typeof window.showSaveFilePicker === 'function' && window.isSecureContext;
+}
+
+function openMissionDataHandleDatabase() {
+    if (typeof indexedDB === 'undefined') return Promise.resolve(null);
+
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(MISSION_DATA_HANDLE_DB_NAME, 1);
+
+        request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains(MISSION_DATA_HANDLE_STORE_NAME)) {
+                db.createObjectStore(MISSION_DATA_HANDLE_STORE_NAME);
+            }
+        };
+
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+async function readStoredMissionDataHandle() {
+    const db = await openMissionDataHandleDatabase();
+    if (!db) return null;
+
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(MISSION_DATA_HANDLE_STORE_NAME, 'readonly');
+        const store = tx.objectStore(MISSION_DATA_HANDLE_STORE_NAME);
+        const request = store.get(MISSION_DATA_HANDLE_KEY);
+
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+        tx.oncomplete = () => db.close();
+        tx.onerror = () => db.close();
+    });
+}
+
+async function storeMissionDataHandle(handle) {
+    const db = await openMissionDataHandleDatabase();
+    if (!db) return;
+
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(MISSION_DATA_HANDLE_STORE_NAME, 'readwrite');
+        const store = tx.objectStore(MISSION_DATA_HANDLE_STORE_NAME);
+        store.put(handle, MISSION_DATA_HANDLE_KEY);
+        tx.oncomplete = () => {
+            db.close();
+            resolve();
+        };
+        tx.onerror = () => {
+            db.close();
+            reject(tx.error);
+        };
+    });
+}
+
+async function clearStoredMissionDataHandle() {
+    missionDataFileHandleDisabled = true;
+    missionDataFileHandleLoadToken += 1;
+    missionDataFileHandle = null;
+    missionDataFileHandleLoadPromise = null;
+
+    const db = await openMissionDataHandleDatabase();
+    if (!db) return;
+
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(MISSION_DATA_HANDLE_STORE_NAME, 'readwrite');
+        const store = tx.objectStore(MISSION_DATA_HANDLE_STORE_NAME);
+        store.delete(MISSION_DATA_HANDLE_KEY);
+        tx.oncomplete = () => {
+            db.close();
+            resolve();
+        };
+        tx.onerror = () => {
+            db.close();
+            reject(tx.error);
+        };
+    });
+}
+
+async function loadMissionDataHandle() {
+    if (missionDataFileHandle) return missionDataFileHandle;
+    if (missionDataFileHandleDisabled) return null;
+    if (missionDataFileHandleLoadPromise) return missionDataFileHandleLoadPromise;
+
+    const loadToken = missionDataFileHandleLoadToken;
+    missionDataFileHandleLoadPromise = (async () => {
+        try {
+            if (!supportsMissionDataFileAccess()) {
+                missionDataFileHandleDisabled = true;
+                return null;
+            }
+            const storedHandle = await readStoredMissionDataHandle();
+            if (loadToken !== missionDataFileHandleLoadToken || missionDataFileHandleDisabled) return null;
+            missionDataFileHandle = storedHandle || null;
+            if (!missionDataFileHandle) {
+                missionDataFileHandleDisabled = true;
+                return null;
+            }
+
+            if (missionDataFileHandle && missionDataPathInput && !missionDefaults.missionDataPath) {
+                missionDefaults.missionDataPath = missionDataFileHandle.name || '';
+                syncMissionDefaultsForm();
+                persistMissionDefaults();
+            }
+
+            return missionDataFileHandle;
+        } catch {
+            return null;
+        } finally {
+            missionDataFileHandleLoadPromise = null;
+        }
+    })();
+
+    return missionDataFileHandleLoadPromise;
+}
+
+async function requestMissionDataHandle() {
+    if (!supportsMissionDataFileAccess()) {
+        alert('Disk file selection requires a secure browser context such as localhost or HTTPS.');
+        return null;
+    }
+
+    const suggestedName = getMissionDataFileName(missionDataPathInput ? missionDataPathInput.value : '');
+
+    try {
+        const handle = await window.showSaveFilePicker({
+            suggestedName,
+            types: [
+                {
+                    description: 'Mission JSON',
+                    accept: { 'application/json': ['.json'] }
+                }
+            ]
+        });
+
+        missionDataFileHandle = handle;
+        missionDataFileHandleDisabled = false;
+        missionDataFileHandleLoadToken += 1;
+
+        try {
+            await storeMissionDataHandle(handle);
+        } catch (error) {
+            console.warn('Failed to store mission data file handle.', error);
+        }
+
+        missionDefaults.missionDataPath = handle.name || suggestedName;
+        syncMissionDefaultsForm();
+        persistMissionDefaults();
+        await queueMissionDataDiskWrite();
+
+        return handle;
+    } catch (error) {
+        if (error && error.name === 'AbortError') return null;
+        console.warn('Mission data file selection failed.', error);
+        return null;
+    }
+}
+
+async function writeMissionDataToDisk() {
+    const handle = await loadMissionDataHandle();
+    if (!handle) return false;
+    const writeToken = missionDataFileHandleLoadToken;
+
+    try {
+        if (missionDataFileHandleDisabled || writeToken !== missionDataFileHandleLoadToken) return false;
+
+        if (typeof handle.queryPermission === 'function') {
+            const permission = await handle.queryPermission({ mode: 'readwrite' });
+            if (permission !== 'granted' && typeof handle.requestPermission === 'function') {
+                const requested = await handle.requestPermission({ mode: 'readwrite' });
+                if (requested !== 'granted') return false;
+            }
+        }
+
+        if (missionDataFileHandleDisabled || writeToken !== missionDataFileHandleLoadToken) return false;
+
+        const writable = await handle.createWritable();
+        if (missionDataFileHandleDisabled || writeToken !== missionDataFileHandleLoadToken) {
+            if (typeof writable.abort === 'function') {
+                try {
+                    await writable.abort();
+                } catch {
+                    // Ignore abort failures after invalidation.
+                }
+            }
+            return false;
+        }
+
+        await writable.write(JSON.stringify(missions, null, 2));
+        await writable.close();
+        return true;
+    } catch (error) {
+        console.warn('Failed to write mission data to disk.', error);
+        return false;
+    }
+}
+
+function queueMissionDataDiskWrite() {
+    missionDataFileWriteQueue = missionDataFileWriteQueue
+        .then(() => writeMissionDataToDisk())
+        .catch(error => {
+            console.warn('Mission data disk write queue failed.', error);
+        });
+
+    return missionDataFileWriteQueue;
+}
+
+function normalizeMissionText(value, uppercase = false) {
+    const text = value == null ? '' : String(value).trim();
+    return uppercase ? text.toUpperCase() : text;
+}
+
+function parseMissionDate(value) {
+    const date = value instanceof Date ? new Date(value) : new Date(value);
+    return Number.isNaN(date.getTime()) ? new Date(NaN) : date;
+}
+
+function normalizeMissionLeg(leg) {
+    const source = leg && typeof leg === 'object' ? leg : {};
+
+    return {
+        takeoffIcao: normalizeMissionText(source.takeoffIcao, true),
+        takeoffTime: parseMissionDate(source.takeoffTime),
+        landIcao: normalizeMissionText(source.landIcao, true),
+        landTime: parseMissionDate(source.landTime)
+    };
+}
+
+function normalizeMissionRecord(mission, index = 0) {
+    if (!mission || typeof mission !== 'object') return null;
+
+    const normalized = { ...mission };
+    normalized.id = mission.id != null ? mission.id : (Date.now() + index);
+    normalized.missionNum = normalizeMissionText(mission.missionNum, true);
+    normalized.tailNum = normalizeMissionText(mission.tailNum);
+    normalized.pilot = normalizeMissionText(mission.pilot);
+    normalized.copilot = normalizeMissionText(mission.copilot);
+    normalized.crewChief = normalizeMissionText(mission.crewChief);
+    normalized.loadmaster = normalizeMissionText(mission.loadmaster);
+    normalized.liftCustomer = normalizeMissionText(mission.liftCustomer);
+    normalized.liftPax = normalizeMissionText(mission.liftPax);
+    normalized.liftCargo = normalizeMissionText(mission.liftCargo);
+    normalized.liftHazmat = normalizeMissionText(mission.liftHazmat);
+    normalized.legs = Array.isArray(mission.legs)
+        ? mission.legs.map(normalizeMissionLeg).sort((a, b) => getDateTimestamp(a.takeoffTime) - getDateTimestamp(b.takeoffTime))
+        : [];
+
+    return normalized;
+}
+
+function loadMissions() {
+    try {
+        const raw = localStorage.getItem(MISSIONS_STORAGE_KEY);
+        if (raw === null) return null;
+
+        try {
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            return parsed.map((mission, index) => normalizeMissionRecord(mission, index)).filter(Boolean);
+        } catch {
+            return [];
+        }
+    } catch {
+        return null;
+    }
+}
+
+function persistMissions() {
+    try {
+        localStorage.setItem(MISSIONS_STORAGE_KEY, JSON.stringify(missions));
+        void queueMissionDataDiskWrite();
+    } catch {
+        // Ignore storage failures in file:// or restricted browser contexts.
+    }
 }
 
 function normalizeIcao(code) {
@@ -128,13 +436,32 @@ function measureTooltipTextWidth(text) {
     return ctx.measureText(text).width;
 }
 
+function getMissionFlightHours(mission) {
+    if (!mission || !Array.isArray(mission.legs) || mission.legs.length === 0) return 0;
+
+    return mission.legs.reduce((total, leg) => {
+        const takeoffTime = leg && leg.takeoffTime instanceof Date ? leg.takeoffTime.getTime() : Number.NaN;
+        const landTime = leg && leg.landTime instanceof Date ? leg.landTime.getTime() : Number.NaN;
+
+        if (Number.isNaN(takeoffTime) || Number.isNaN(landTime) || landTime <= takeoffTime) {
+            return total;
+        }
+
+        return total + ((landTime - takeoffTime) / MS_PER_HOUR);
+    }, 0);
+}
+
+function formatMissionFlightHours(mission) {
+    return getMissionFlightHours(mission).toFixed(2);
+}
+
 function setHoverTooltipWidth(mission) {
     const legs = Array.isArray(mission.legs) ? [...mission.legs].sort((a, b) => getDateTimestamp(a.takeoffTime) - getDateTimestamp(b.takeoffTime)) : [];
     const lines = legs.length > 0
         ? legs.map((leg, index) => getTooltipLegText(leg, index))
         : ['No route legs available.'];
 
-    const missionLine = `Mission: ${mission.missionNum || 'TBD'} | Tail: ${mission.tailNum || 'TBD'}`;
+    const missionLine = `Mission: ${mission.missionNum || 'TBD'} | Tail: ${mission.tailNum || 'TBD'} | Flight Hours: ${formatMissionFlightHours(mission)}`;
     lines.unshift(missionLine);
 
     let contentWidth = 0;
@@ -239,6 +566,7 @@ function loadAirportData() {
 
 function clearHoverRouteMap() {
     hoverTooltipToken += 1;
+    activeTooltipMissionId = null;
     if (hoverRouteMap) {
         hoverRouteMap.remove();
         hoverRouteMap = null;
@@ -285,6 +613,116 @@ function getMissionRouteCodes(mission) {
     return codes;
 }
 
+function getRouteSegmentPlacement(map, start, end) {
+    const startPoint = map.latLngToLayerPoint(L.latLng(start[0], start[1]));
+    const endPoint = map.latLngToLayerPoint(L.latLng(end[0], end[1]));
+    const delta = endPoint.subtract(startPoint);
+    const length = Math.hypot(delta.x, delta.y);
+
+    if (!length) {
+        return {
+            latLng: map.layerPointToLatLng(endPoint),
+            angle: 0
+        };
+    }
+
+    const direction = delta.divideBy(length);
+    const tipPoint = endPoint.subtract(direction.multiplyBy(ROUTE_AIRPORT_DOT_EDGE_PX));
+
+    return {
+        latLng: map.layerPointToLatLng(tipPoint),
+        angle: Math.atan2(delta.y, delta.x) * 180 / Math.PI
+    };
+}
+
+function getRouteLabelPlacement(map, routePoints, index, offsetPx = 16) {
+    const currentPoint = map.latLngToLayerPoint(L.latLng(routePoints[index][0], routePoints[index][1]));
+    const prevRaw = routePoints[index - 1];
+    const nextRaw = routePoints[index + 1];
+    const routeCenterPoint = routePoints.reduce((acc, point) => {
+        const layerPoint = map.latLngToLayerPoint(L.latLng(point[0], point[1]));
+        acc.x += layerPoint.x;
+        acc.y += layerPoint.y;
+        return acc;
+    }, { x: 0, y: 0 });
+
+    routeCenterPoint.x /= routePoints.length;
+    routeCenterPoint.y /= routePoints.length;
+
+    let direction = null;
+
+    if (prevRaw && nextRaw) {
+        const prevPoint = map.latLngToLayerPoint(L.latLng(prevRaw[0], prevRaw[1]));
+        const nextPoint = map.latLngToLayerPoint(L.latLng(nextRaw[0], nextRaw[1]));
+        const incoming = currentPoint.subtract(prevPoint);
+        const outgoing = nextPoint.subtract(currentPoint);
+        const incomingLength = Math.hypot(incoming.x, incoming.y);
+        const outgoingLength = Math.hypot(outgoing.x, outgoing.y);
+        const incomingUnit = incomingLength ? incoming.divideBy(incomingLength) : null;
+        const outgoingUnit = outgoingLength ? outgoing.divideBy(outgoingLength) : null;
+
+        if (incomingUnit && outgoingUnit) {
+            direction = incomingUnit.add(outgoingUnit);
+            if (!direction.x && !direction.y) {
+                direction = outgoingUnit;
+            }
+        } else {
+            direction = outgoingUnit || incomingUnit;
+        }
+    } else if (nextRaw) {
+        const nextPoint = map.latLngToLayerPoint(L.latLng(nextRaw[0], nextRaw[1]));
+        direction = nextPoint.subtract(currentPoint);
+    } else if (prevRaw) {
+        const prevPoint = map.latLngToLayerPoint(L.latLng(prevRaw[0], prevRaw[1]));
+        direction = currentPoint.subtract(prevPoint);
+    }
+
+    if (!direction || (!direction.x && !direction.y)) {
+        return map.layerPointToLatLng(currentPoint);
+    }
+
+    const length = Math.hypot(direction.x, direction.y) || 1;
+    const unit = direction.divideBy(length);
+    const normal = L.point(-unit.y, unit.x);
+    const outward = currentPoint.add(normal.multiplyBy(offsetPx));
+    const inward = currentPoint.subtract(normal.multiplyBy(offsetPx));
+
+    const outwardDistance = Math.hypot(outward.x - routeCenterPoint.x, outward.y - routeCenterPoint.y);
+    const inwardDistance = Math.hypot(inward.x - routeCenterPoint.x, inward.y - routeCenterPoint.y);
+    const placementPoint = outwardDistance >= inwardDistance ? outward : inward;
+
+    return map.layerPointToLatLng(placementPoint);
+}
+
+function createRouteDirectionIcon(angle) {
+    return L.divIcon({
+        className: 'route-direction-marker',
+        html: `
+            <svg class="route-direction-arrow" viewBox="0 0 20 16" aria-hidden="true">
+                <g transform="rotate(${angle} 18 8)">
+                    <path class="route-direction-arrow-shaft" d="M2 8h7" />
+                    <path class="route-direction-arrow-head" d="M9 1l9 7-9 7z" />
+                </g>
+            </svg>
+        `,
+        iconSize: [20, 16],
+        iconAnchor: [18, 8]
+    });
+}
+
+function createAirportCircleMarker(latlng) {
+    return L.circleMarker(latlng, {
+        radius: ROUTE_AIRPORT_DOT_RADIUS_PX,
+        color: '#000',
+        weight: ROUTE_AIRPORT_DOT_WEIGHT_PX,
+        fillColor: '#000',
+        fillOpacity: 1,
+        opacity: 1,
+        interactive: false,
+        bubblingMouseEvents: false
+    });
+}
+
 function buildMissionTooltipHTML(mission) {
     const legs = Array.isArray(mission.legs) ? [...mission.legs].sort((a, b) => getDateTimestamp(a.takeoffTime) - getDateTimestamp(b.takeoffTime)) : [];
     const routeLines = legs.length > 0
@@ -296,10 +734,11 @@ function buildMissionTooltipHTML(mission) {
             return `<div class="tooltip-leg-line">Leg ${index + 1}: ${takeoffName} (${takeoffTime}) → ${landName} (${landTime})</div>`;
         }).join('')
         : '<div>No route legs available.</div>';
+    const flightHours = escapeHtml(formatMissionFlightHours(mission));
 
     return `
         <div class="tooltip-summary">
-            <div><strong>Mission:</strong> ${escapeHtml(mission.missionNum || 'TBD')} | <strong>Tail:</strong> ${escapeHtml(mission.tailNum || 'TBD')}</div>
+            <div><strong>Mission:</strong> ${escapeHtml(mission.missionNum || 'TBD')} | <strong>Tail:</strong> ${escapeHtml(mission.tailNum || 'TBD')} | <strong>Flight Hours:</strong> ${flightHours}</div>
             <hr class="tooltip-separator">
             <div class="tooltip-itinerary">${routeLines}</div>
         </div>
@@ -344,14 +783,19 @@ async function renderHoverRouteMap(mission, token) {
         await new Promise(resolve => requestAnimationFrame(resolve));
         if (token !== hoverTooltipToken) return;
 
-        const routePoints = [];
+        const routePointEntries = [];
         const markerCodes = new Set();
 
         routeCodes.forEach(code => {
             const airport = airportData[code];
             if (!airport) return;
-            routePoints.push([airport.lat, airport.lon]);
+            routePointEntries.push({
+                code,
+                point: [airport.lat, airport.lon]
+            });
         });
+
+        const routePoints = routePointEntries.map(entry => entry.point);
 
         if (routePoints.length < 2) {
             statusEl.textContent = 'Route map unavailable for this mission.';
@@ -384,20 +828,42 @@ async function renderHoverRouteMap(mission, token) {
 
         const routeLayer = L.layerGroup().addTo(hoverRouteMap);
 
-        routeCodes.forEach(code => {
-            const airport = airportData[code];
-            if (!airport || markerCodes.has(code)) return;
+        L.polyline(routePoints, { color: '#d71920', weight: 4 }).addTo(routeLayer);
+        hoverRouteMap.fitBounds(routePoints, { padding: [18, 18] });
+
+        routePointEntries.forEach(entry => {
+            createAirportCircleMarker(entry.point).addTo(routeLayer);
+        });
+
+        routePointEntries.forEach((entry, index) => {
+            const { code } = entry;
+            if (markerCodes.has(code)) return;
             markerCodes.add(code);
-            L.marker([airport.lat, airport.lon], {
+            const labelLatLng = getRouteLabelPlacement(hoverRouteMap, routePoints, index);
+            L.marker(labelLatLng, {
+                interactive: false,
+                keyboard: false,
                 icon: L.divIcon({
                     className: 'route-icao-label',
-                    html: escapeHtml(code)
+                    html: escapeHtml(code),
+                    iconSize: null,
+                    iconAnchor: [0, 0]
                 })
             }).addTo(routeLayer);
         });
 
-        L.polyline(routePoints, { color: '#d71920', weight: 4 }).addTo(routeLayer);
-        hoverRouteMap.fitBounds(routePoints, { padding: [18, 18] });
+        for (let i = 0; i < routePoints.length - 1; i++) {
+            const start = routePoints[i];
+            const end = routePoints[i + 1];
+            if (start[0] === end[0] && start[1] === end[1]) continue;
+
+            const placement = getRouteSegmentPlacement(hoverRouteMap, start, end);
+            L.marker(placement.latLng, {
+                interactive: false,
+                keyboard: false,
+                icon: createRouteDirectionIcon(placement.angle)
+            }).addTo(routeLayer);
+        }
 
         routeMapEl.style.visibility = 'visible';
         statusEl.textContent = '';
@@ -418,6 +884,7 @@ async function renderHoverRouteMap(mission, token) {
 
 function showMissionTooltip(mission, event) {
     clearHoverRouteMap();
+    activeTooltipMissionId = mission.id;
     hoverTooltipPosition = { x: event.pageX, y: event.pageY };
     const token = hoverTooltipToken;
 
@@ -426,6 +893,95 @@ function showMissionTooltip(mission, event) {
     setHoverTooltipWidth(mission);
     positionHoverTooltip(event.pageX, event.pageY);
     renderHoverRouteMap(mission, token);
+}
+
+function cloneMissionRecord(mission) {
+    return {
+        ...mission,
+        legs: Array.isArray(mission.legs)
+            ? mission.legs.map(leg => ({
+                ...leg,
+                takeoffTime: new Date(leg.takeoffTime),
+                landTime: new Date(leg.landTime)
+            }))
+            : []
+    };
+}
+
+function getEditingMissionRecord() {
+    if (editingMissionId == null) return null;
+    return missions.find(mission => String(mission.id) === String(editingMissionId)) || null;
+}
+
+function applyMissionDataInPlace(target, missionData) {
+    const id = target.id;
+    Object.keys(target).forEach(key => {
+        if (key !== 'id') delete target[key];
+    });
+    Object.assign(target, { id, ...missionData });
+}
+
+function buildMissionDataFromForm() {
+    const legNodes = document.querySelectorAll('.leg-container');
+    let legs = [];
+    let timeValid = true;
+
+    legNodes.forEach(node => {
+        const tkIcao = node.querySelector('.leg-tk-icao').value.trim().toUpperCase();
+        const ldIcao = node.querySelector('.leg-ld-icao').value.trim().toUpperCase();
+        const tkTime = parseDateTimeLocalValue(node.querySelector('.leg-tk-time').value);
+        const ldTime = parseDateTimeLocalValue(node.querySelector('.leg-ld-time').value);
+
+        if (!tkTime || !ldTime || ldTime <= tkTime) timeValid = false;
+        legs.push({
+            takeoffIcao: tkIcao,
+            takeoffTime: tkTime || new Date(NaN),
+            landIcao: ldIcao,
+            landTime: ldTime || new Date(NaN)
+        });
+    });
+
+    return {
+        hasLegs: legNodes.length > 0,
+        timeValid,
+        missionData: {
+            missionNum: document.getElementById('missionNum').value.toUpperCase(),
+            tailNum: document.getElementById('tailNum').value,
+            pilot: document.getElementById('pilot').value,
+            copilot: document.getElementById('copilot').value,
+            crewChief: document.getElementById('crewChief').value,
+            loadmaster: document.getElementById('loadmaster').value,
+            liftCustomer: document.getElementById('liftCustomer').value,
+            liftPax: document.getElementById('liftPax').value,
+            liftCargo: document.getElementById('liftCargo').value,
+            liftHazmat: document.getElementById('liftHazmat').value,
+            legs
+        }
+    };
+}
+
+function refreshTooltipForMission(missionId) {
+    if (tooltip.style.display === 'none') return;
+    if (activeTooltipMissionId == null || String(activeTooltipMissionId) !== String(missionId)) return;
+
+    const mission = missions.find(item => String(item.id) === String(missionId));
+    if (!mission) return;
+
+    showMissionTooltip(mission, {
+        pageX: hoverTooltipPosition.x,
+        pageY: hoverTooltipPosition.y
+    });
+}
+
+function syncEditingMissionPreview() {
+    const mission = getEditingMissionRecord();
+    if (!mission) return;
+
+    const snapshot = buildMissionDataFromForm();
+    if (!snapshot.timeValid) return;
+
+    applyMissionDataInPlace(mission, snapshot.missionData);
+    refreshTooltipForMission(mission.id);
 }
 
 function getMissionHomeField() {
@@ -469,10 +1025,10 @@ function getNextLegDefaults() {
 
     const takeoffIcao = previousLandIcaoInput ? previousLandIcaoInput.value.trim().toUpperCase() : '';
     const takeoffTime = previousLandTime ? new Date(previousLandTime) : createDateTimeLocal(1, 9, 0);
-    if (previousLandTime) takeoffTime.setDate(takeoffTime.getDate() + 1);
+    if (previousLandTime) takeoffTime.setMinutes(takeoffTime.getMinutes() + 60);
 
     const landTime = new Date(takeoffTime);
-    landTime.setMinutes(landTime.getMinutes() + 210);
+    landTime.setMinutes(landTime.getMinutes() + 180);
 
     return {
         takeoffIcao,
@@ -508,16 +1064,19 @@ function init() {
     missionDefaults = loadMissionDefaults();
     syncMissionDefaultsForm();
 
-    snapToFourteenDayOutlook();
-    addDummyData();
-    void loadAirportData().catch(() => {});
-}
+    const loadedMissions = loadMissions();
+    if (loadedMissions !== null) {
+        missions = loadedMissions;
+    } else {
+        //addDummyData();
+    }
 
-function snapToCurrentMonth() {
-    const now = new Date();
-    viewStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime(); 
-    viewEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).getTime(); 
-    renderTimeline();
+    snapToSevenDayOutlook();
+    renderMissionCards();
+    void loadMissionDataHandle().then(handle => {
+        if (handle) void queueMissionDataDiskWrite();
+    });
+    void loadAirportData().catch(() => {});
 }
 
 function snapToSevenDayOutlook() {
@@ -546,15 +1105,28 @@ function snapToFourteenDayOutlook() {
     renderTimeline();
 }
 
+function snapToThirtyDayOutlook() {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()-1);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 31);
+    end.setHours(23, 59, 59, 999);
+
+    viewStart = start.getTime();
+    viewEnd = end.getTime();
+
+    renderTimeline();
+}
+
 function snapToFY(fy) {
     viewStart = new Date(fy - 1, 9, 1).getTime(); 
     viewEnd = new Date(fy, 8, 30, 23, 59, 59).getTime(); 
     renderTimeline();
 }
 
-document.getElementById('btn-snap-month').addEventListener('click', snapToCurrentMonth);
 document.getElementById('btn-snap-7day').addEventListener('click', snapToSevenDayOutlook);
 document.getElementById('btn-snap-14day').addEventListener('click', snapToFourteenDayOutlook);
+document.getElementById('btn-snap-30day').addEventListener('click', snapToThirtyDayOutlook);
 document.getElementById('btn-snap-fy').addEventListener('click', () => snapToFY(parseInt(document.getElementById('fy-input').value, 10)));
 tabButtons.forEach(button => {
     button.addEventListener('click', () => activateTab(button.dataset.tab));
@@ -597,8 +1169,10 @@ window.addEventListener('mousemove', (e) => {
 
 function getMissionTimes(mission) {
     if(!mission.legs || mission.legs.length === 0) return { start: 0, end: 0 };
-    const start = mission.legs[0].takeoffTime.getTime();
-    const end = mission.legs[mission.legs.length - 1].landTime.getTime();
+    const firstLeg = mission.legs[0] || {};
+    const lastLeg = mission.legs[mission.legs.length - 1] || {};
+    const start = getDateTimestamp(firstLeg.takeoffTime);
+    const end = getDateTimestamp(lastLeg.landTime);
     return { start, end };
 }
 
@@ -986,6 +1560,7 @@ function deleteMission(id, event) {
     event.stopPropagation();
     if(confirm("Are you sure you want to delete this mission?")) {
         missions = missions.filter(m => m.id !== id);
+        persistMissions();
         renderTimeline();
         renderMissionCards();
     }
@@ -1041,10 +1616,12 @@ document.getElementById('csv-file-input').addEventListener('change', function(e)
         missionMap.forEach(m => {
             if(m.legs.length > 0) {
                 m.legs.sort((a,b) => a.takeoffTime - b.takeoffTime);
-                missions.push(m);
+                const normalizedMission = normalizeMissionRecord(m);
+                if (normalizedMission) missions.push(normalizedMission);
             }
         });
         
+        persistMissions();
         renderTimeline();
         renderMissionCards();
         alert("CSV Imported Successfully!");
@@ -1060,7 +1637,10 @@ missionDefaultsForm.addEventListener('submit', function(e) {
     persistMissionDefaults();
 });
 
-missionDefaultsForm.addEventListener('input', () => {
+missionDefaultsForm.addEventListener('input', event => {
+    if (event.target === missionDataPathInput && !missionDataFileHandleDisabled) {
+        void clearStoredMissionDataHandle();
+    }
     missionDefaults = readMissionDefaultsForm();
     persistMissionDefaults();
 });
@@ -1069,6 +1649,11 @@ document.getElementById('btn-clear-defaults').addEventListener('click', () => {
     missionDefaults = createEmptyMissionDefaults();
     persistMissionDefaults();
     syncMissionDefaultsForm();
+    void clearStoredMissionDataHandle();
+});
+
+document.getElementById('btn-choose-mission-data-file').addEventListener('click', () => {
+    void requestMissionDataHandle();
 });
 
 function toDateTimeLocal(date) {
@@ -1217,12 +1802,22 @@ function addLegRow(legData = null) {
             <div class="form-col leg-col-wide"><label class="leg-label">Land Time</label><input type="datetime-local" class="leg-ld-time" required value="${toDateTimeLocal(defaultLegData.landTime)}"></div>
             <div><button type="button" class="btn btn-remove-leg leg-remove-btn" title="Remove Leg">&times;</button></div>
         </div>
-    `;
-    div.querySelector('.btn-remove-leg').addEventListener('click', () => div.remove());
+    `;    
+    div.querySelector('.btn-remove-leg').addEventListener('click', () => {
+        div.remove();
+        syncEditingMissionPreview();
+    });
     legsWrapper.appendChild(div);
+    if (!legData) syncEditingMissionPreview();
 }
 
 document.getElementById('btn-add-leg').addEventListener('click', () => addLegRow());
+missionForm.addEventListener('input', event => {
+    if (event.target.closest('.leg-container')) syncEditingMissionPreview();
+});
+missionForm.addEventListener('change', event => {
+    if (event.target.closest('.leg-container')) syncEditingMissionPreview();
+});
 
 document.getElementById('btn-new-mission').addEventListener('click', () => {
     missionForm.reset();
@@ -1234,9 +1829,39 @@ document.getElementById('btn-new-mission').addEventListener('click', () => {
     modal.style.display = "block";
 });
 
-document.getElementById('close-modal').addEventListener('click', () => modal.style.display = "none");
+function clearEditSession() {
+    editingMissionId = null;
+    editingMissionBackup = null;
+}
+
+function startEditSession(mission) {
+    editingMissionId = mission.id;
+    editingMissionBackup = cloneMissionRecord(mission);
+}
+
+function restoreEditSession() {
+    if (editingMissionId == null || !editingMissionBackup) {
+        clearEditSession();
+        return;
+    }
+
+    const mission = getEditingMissionRecord();
+    if (mission) {
+        applyMissionDataInPlace(mission, cloneMissionRecord(editingMissionBackup));
+    }
+
+    const restoredMissionId = editingMissionId;
+    clearEditSession();
+    refreshTooltipForMission(restoredMissionId);
+}
+
+document.getElementById('close-modal').addEventListener('click', () => {
+    restoreEditSession();
+    modal.style.display = "none";
+});
 
 function openEditModal(mission) {
+    startEditSession(mission);
     document.getElementById('editMissionId').value = mission.id;
     document.getElementById('missionNum').value = mission.missionNum;
     document.getElementById('tailNum').value = mission.tailNum;
@@ -1259,51 +1884,32 @@ function openEditModal(mission) {
 
 missionForm.addEventListener('submit', function(e) {
     e.preventDefault();
-    
-    const legNodes = document.querySelectorAll('.leg-container');
-    if(legNodes.length === 0) return alert("You must add at least one flight leg.");
-
-    let legs = [];
-    let timeValid = true;
-
-    legNodes.forEach(node => {
-        const tkIcao = node.querySelector('.leg-tk-icao').value.trim().toUpperCase();
-        const ldIcao = node.querySelector('.leg-ld-icao').value.trim().toUpperCase();
-        const tkTime = new Date(node.querySelector('.leg-tk-time').value);
-        const ldTime = new Date(node.querySelector('.leg-ld-time').value);
-
-        if (ldTime <= tkTime) timeValid = false;
-        legs.push({ takeoffIcao: tkIcao, takeoffTime: tkTime, landIcao: ldIcao, landTime: ldTime });
-    });
-
+    const { hasLegs, timeValid, missionData } = buildMissionDataFromForm();
+    if (!hasLegs) return alert("You must add at least one flight leg.");
     if (!timeValid) return alert("Landing time must be after takeoff time for all legs.");
-    legs.sort((a, b) => a.takeoffTime - b.takeoffTime);
-
-    const missionData = {
-        missionNum: document.getElementById('missionNum').value.toUpperCase(),
-        tailNum: document.getElementById('tailNum').value,
-        pilot: document.getElementById('pilot').value,
-        copilot: document.getElementById('copilot').value,
-        crewChief: document.getElementById('crewChief').value,
-        loadmaster: document.getElementById('loadmaster').value,
-        liftCustomer: document.getElementById('liftCustomer').value,
-        liftPax: document.getElementById('liftPax').value,
-        liftCargo: document.getElementById('liftCargo').value,
-        liftHazmat: document.getElementById('liftHazmat').value,
-        legs: legs
-    };
+    missionData.legs.sort((a, b) => a.takeoffTime - b.takeoffTime);
 
     const editId = document.getElementById('editMissionId').value;
+    const committedMissionId = editId || null;
     if (editId) {
         const index = missions.findIndex(m => m.id == editId);
-        if (index > -1) missions[index] = { ...missions[index], ...missionData };
+        if (index > -1) {
+            const normalizedMission = normalizeMissionRecord({ id: missions[index].id, ...missionData });
+            if (normalizedMission) applyMissionDataInPlace(missions[index], normalizedMission);
+        }
     } else {
-        missions.push({ id: Date.now(), ...missionData });
+        const normalizedMission = normalizeMissionRecord({ id: Date.now(), ...missionData });
+        if (normalizedMission) missions.push(normalizedMission);
     }
 
+    persistMissions();
+    clearEditSession();
     modal.style.display = "none";
     renderTimeline();
     renderMissionCards();
+    if (committedMissionId != null) {
+        refreshTooltipForMission(committedMissionId);
+    }
 });
 
 function addDummyData() {
@@ -1329,8 +1935,7 @@ function addDummyData() {
         liftPax: 91, liftCargo: '500', liftHazmat: 'Yes'
     });
 
-    renderTimeline();
-    renderMissionCards();
+    persistMissions();
 }
 
 init();
