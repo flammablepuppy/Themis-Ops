@@ -1,13 +1,12 @@
 [
   {
-    "id": 1780095892155,
+    "id": 1780097691201,
     "missionNum": "CNV42069",
     "tailNum": "695",
     "pilot": "",
     "copilot": "",
     "crewChief": "",
     "loadmaster": "",
-    "liftCustomer": "DEVGRU",
     "liftPax": "30",
     "liftCargo": "2000",
     "liftHazmat": "Yes",
@@ -30,17 +29,17 @@
         "landIcao": "KNUW",
         "landTime": "2026-06-01T19:30:00.000Z"
       }
-    ]
+    ],
+    "liftCustomer": ""
   },
   {
-    "id": 1780096282842,
+    "id": 1780097691204,
     "missionNum": "CNV4444",
     "tailNum": "834",
     "pilot": "",
     "copilot": "",
     "crewChief": "",
     "loadmaster": "",
-    "liftCustomer": "",
     "liftPax": "",
     "liftCargo": "",
     "liftHazmat": "",
@@ -51,6 +50,7 @@
         "landIcao": "KPNS",
         "landTime": "2026-06-01T19:30:00.000Z"
       }
-    ]
+    ],
+    "liftCustomer": ""
   }
 ]

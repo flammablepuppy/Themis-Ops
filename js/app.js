@@ -2,6 +2,7 @@
 let viewStart, viewEnd; 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MS_PER_HOUR = 60 * 60 * 1000;
+const CURRENT_TIME_BUBBLE_HEIGHT_PX = 38;
 
 const viewport = document.getElementById('timeline-viewport');
 const gridContainer = document.getElementById('timeline-grid');
@@ -41,6 +42,8 @@ let missionDataFileHandleLoadPromise = null;
 let missionDataFileWriteQueue = Promise.resolve();
 let missionDataFileHandleDisabled = false;
 let missionDataFileHandleLoadToken = 0;
+let currentTimeBubbleStrip = null;
+let currentTimeIndicatorRefreshTimer = null;
 
 function createEmptyMissionDefaults() {
     return {
@@ -394,6 +397,40 @@ function formatTooltipDateTime(date) {
     return date instanceof Date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : 'TBD';
 }
 
+function formatZuluTime(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}Z`;
+}
+
+function getMilitaryTimezoneCharacter(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+
+    const offsetHours = -(date.getTimezoneOffset() / 60);
+    if (offsetHours === 0) return 'Z';
+    if (!Number.isInteger(offsetHours) || Math.abs(offsetHours) > 12) return '?';
+
+    const positiveLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M'];
+    const negativeLetters = ['N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y'];
+
+    if (offsetHours > 0) {
+        return positiveLetters[offsetHours - 1] || '';
+    }
+
+    return negativeLetters[Math.abs(offsetHours) - 1] || '';
+}
+
+function formatLocalMilitaryTime(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const zone = getMilitaryTimezoneCharacter(date);
+    return `${hours}:${minutes}${zone}`;
+}
+
 function getAirportDisplayName(code) {
     const airport = airportData[normalizeIcao(code)];
     if (airport && airport.name) return airport.name;
@@ -475,6 +512,83 @@ function setHoverTooltipWidth(mission) {
     const maxWidth = Math.max(280, document.documentElement.clientWidth - 24);
 
     tooltip.style.width = `${Math.min(targetWidth, maxWidth)}px`;
+}
+
+function ensureCurrentTimeBubbleStrip() {
+    const timelineWrapper = document.querySelector('.timeline-wrapper');
+    if (!timelineWrapper) return null;
+
+    if (currentTimeBubbleStrip && document.body.contains(currentTimeBubbleStrip)) {
+        return currentTimeBubbleStrip;
+    }
+
+    currentTimeBubbleStrip = document.getElementById('current-time-bubble-strip');
+    if (!currentTimeBubbleStrip) {
+        currentTimeBubbleStrip = document.createElement('div');
+        currentTimeBubbleStrip.id = 'current-time-bubble-strip';
+        currentTimeBubbleStrip.setAttribute('aria-hidden', 'true');
+        timelineWrapper.insertAdjacentElement('afterend', currentTimeBubbleStrip);
+    }
+
+    return currentTimeBubbleStrip;
+}
+
+function syncCurrentTimeIndicator() {
+    const existingIndicator = gridContainer.querySelector('.current-time-line');
+    const now = new Date();
+    const nowTime = now.getTime();
+    const duration = viewEnd - viewStart;
+    const strip = ensureCurrentTimeBubbleStrip();
+
+    if (!(duration > 0) || nowTime < viewStart || nowTime > viewEnd) {
+        if (existingIndicator) existingIndicator.remove();
+        if (strip) strip.hidden = true;
+        return;
+    }
+
+    const nowPct = ((nowTime - viewStart) / duration) * 100;
+    let timeLine = existingIndicator;
+
+    if (!timeLine) {
+        timeLine = document.createElement('div');
+        timeLine.className = 'current-time-line';
+        timeLine.setAttribute('aria-hidden', 'true');
+
+        gridContainer.appendChild(timeLine);
+    }
+
+    timeLine.style.left = `${nowPct}%`;
+    timeLine.style.bottom = '0';
+
+    if (strip) {
+        strip.hidden = false;
+        const sidebar = document.querySelector('.timeline-sidebar');
+        const sidebarWidth = sidebar ? sidebar.getBoundingClientRect().width : 0;
+        const viewportWidth = viewport ? viewport.getBoundingClientRect().width : 0;
+
+        strip.style.marginLeft = `${sidebarWidth}px`;
+        strip.style.width = `${viewportWidth}px`;
+        strip.style.height = `${CURRENT_TIME_BUBBLE_HEIGHT_PX}px`;
+
+        let bubble = strip.querySelector('.current-time-bubble');
+        if (!bubble) {
+            bubble = document.createElement('div');
+            bubble.className = 'current-time-bubble';
+            bubble.setAttribute('aria-hidden', 'true');
+            strip.appendChild(bubble);
+        }
+
+        bubble.style.left = `${nowPct}%`;
+        const zuluLine = document.createElement('span');
+        zuluLine.className = 'current-time-bubble-line current-time-bubble-utc';
+        zuluLine.textContent = formatZuluTime(now);
+
+        const localLine = document.createElement('span');
+        localLine.className = 'current-time-bubble-line current-time-bubble-local';
+        localLine.textContent = formatLocalMilitaryTime(now);
+
+        bubble.replaceChildren(zuluLine, localLine);
+    }
 }
 
 function parseCsvLine(line) {
@@ -1073,6 +1187,9 @@ function init() {
 
     snapToSevenDayOutlook();
     renderMissionCards();
+    if (!currentTimeIndicatorRefreshTimer) {
+        currentTimeIndicatorRefreshTimer = window.setInterval(syncCurrentTimeIndicator, 1000);
+    }
     void loadMissionDataHandle().then(handle => {
         if (handle) void queueMissionDataDiskWrite();
     });
@@ -1227,17 +1344,7 @@ function renderTimeline() {
         gridContainer.appendChild(todayHighlight);
     }
 
-    // Current time indicator
-    const nowTime = now.getTime();
-    if (nowTime >= viewStart && nowTime <= viewEnd) {
-        const nowPct = ((nowTime - viewStart) / duration) * 100;
-
-        const timeLine = document.createElement('div');
-        timeLine.className = 'current-time-line';
-        timeLine.style.left = `${nowPct}%`;
-
-        gridContainer.appendChild(timeLine);
-    }
+    syncCurrentTimeIndicator();
 
     // Determine zoom granularity
     const totalDaysVisible = duration / MS_PER_DAY;
