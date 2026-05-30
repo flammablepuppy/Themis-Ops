@@ -12,7 +12,7 @@
 <div class="container">
     <div class="app-tabs" role="tablist" aria-label="Application sections">
         <button class="app-tab active" id="tab-timeline" type="button" role="tab" aria-controls="timeline-panel" data-tab="timeline-panel" aria-selected="true">Timeline</button>
-        <button class="app-tab" id="tab-defaults" type="button" role="tab" aria-controls="defaults-panel" data-tab="defaults-panel" aria-selected="false">Mission Defaults</button>
+        <button class="app-tab" id="tab-defaults" type="button" role="tab" aria-controls="defaults-panel" data-tab="defaults-panel" aria-selected="false">Configuration</button>
     </div>
 
     <section id="timeline-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-timeline">
@@ -72,6 +72,12 @@
                 </div>
                 <div class="form-row">
                     <div class="form-col">
+                        <label>Available Tail Numbers</label>
+                        <textarea id="defaultTailNumbers" rows="3" placeholder="695, 834, 877"></textarea>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-col">
                         <label>Mission Data Path</label>
                         <div class="mission-path-picker">
                             <input type="text" id="defaultMissionDataPath" placeholder="themis_missions.json">
@@ -95,8 +101,12 @@
         <form id="mission-form">
             <input type="hidden" id="editMissionId">
             <div class="form-row">
-                <div class="form-col"><label>Mission #</label><input type="text" id="missionNum" required></div>
-                <div class="form-col"><label>Tail #</label><input type="text" id="tailNum" required></div>
+                <div class="form-col"><label>Mission #</label><input type="text" id="missionNum" placeholder="CNV" required></div>
+                <div class="form-col">
+                    <label>Tail #</label>
+                    <input type="text" id="tailNum" list="tailNumOptions" placeholder="Select or type tail number" required>
+                    <datalist id="tailNumOptions"></datalist>
+                </div>
             </div>
 
             <div class="form-section-title">
@@ -116,10 +126,10 @@
 
             <div class="form-section-title">Lift</div>
             <div class="form-row">
-                <div class="form-col"><label>Customer</label><input type="text" id="liftCustomer" placeholder=""></div>
-                <div class="form-col"><label>Pax</label><input type="number" id="liftPax" min="0" placeholder=""></div>
-                <div class="form-col"><label>Cargo</label><input type="text" id="liftCargo" placeholder=""></div>
-                <div class="form-col"><label>Hazmat</label><input type="text" id="liftHazmat" placeholder=""></div>
+                <div class="form-col"><label>Customer</label><input type="text" id="liftCustomer"></div>
+                <div class="form-col"><label>Pax</label><input type="number" id="liftPax" min="0"></div>
+                <div class="form-col"><label>Cargo</label><input type="text" id="liftCargo"></div>
+                <div class="form-col"><label>Hazmat</label><input type="text" id="liftHazmat"></div>
             </div>
 
             <button type="submit" class="btn submit-btn" id="btn-submit-form">Submit Mission</button>

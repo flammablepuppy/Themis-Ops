@@ -16,6 +16,7 @@ const missionForm = document.getElementById('mission-form');
 const legsWrapper = document.getElementById('legs-wrapper');
 const missionDefaultsForm = document.getElementById('mission-defaults-form');
 const missionHomeFieldInput = document.getElementById('defaultHomeField');
+const missionTailNumbersInput = document.getElementById('defaultTailNumbers');
 const missionDataPathInput = document.getElementById('defaultMissionDataPath');
 const DEFAULTS_STORAGE_KEY = 'themis-ops-mission-defaults';
 const MISSIONS_STORAGE_KEY = 'themis-ops-missions';
@@ -44,12 +45,26 @@ let missionDataFileHandleDisabled = false;
 let missionDataFileHandleLoadToken = 0;
 let currentTimeBubbleStrip = null;
 let currentTimeIndicatorRefreshTimer = null;
+let missionCardFocusTimeout = null;
+let focusedMissionCardId = null;
 
 function createEmptyMissionDefaults() {
     return {
         homeField: '',
-        missionDataPath: ''
+        missionDataPath: '',
+        availableTailNumbers: ''
     };
+}
+
+function normalizeTailNumbersField(value) {
+    if (Array.isArray(value)) {
+        return value
+            .map(item => normalizeMissionText(item))
+            .filter(Boolean)
+            .join('\n');
+    }
+
+    return typeof value === 'string' ? value.trim() : '';
 }
 
 function loadMissionDefaults() {
@@ -60,10 +75,12 @@ function loadMissionDefaults() {
         if (!parsed || typeof parsed !== 'object') return createEmptyMissionDefaults();
         const homeField = typeof parsed.homeField === 'string' ? parsed.homeField : '';
         const missionDataPath = typeof parsed.missionDataPath === 'string' ? parsed.missionDataPath : '';
+        const availableTailNumbers = normalizeTailNumbersField(parsed.availableTailNumbers ?? parsed.tailNumbers ?? '');
         const legacyHomeField = typeof parsed.tailNum === 'string' ? parsed.tailNum : '';
         return {
             homeField: (homeField || legacyHomeField).trim(),
-            missionDataPath: missionDataPath.trim()
+            missionDataPath: missionDataPath.trim(),
+            availableTailNumbers
         };
     } catch {
         return createEmptyMissionDefaults();
@@ -80,13 +97,15 @@ function persistMissionDefaults() {
 
 function syncMissionDefaultsForm() {
     if (missionHomeFieldInput) missionHomeFieldInput.value = missionDefaults.homeField ?? '';
+    if (missionTailNumbersInput) missionTailNumbersInput.value = missionDefaults.availableTailNumbers ?? '';
     if (missionDataPathInput) missionDataPathInput.value = missionDefaults.missionDataPath ?? '';
 }
 
 function readMissionDefaultsForm() {
     return {
         homeField: missionHomeFieldInput ? missionHomeFieldInput.value.trim() : '',
-        missionDataPath: missionDataPathInput ? missionDataPathInput.value.trim() : ''
+        missionDataPath: missionDataPathInput ? missionDataPathInput.value.trim() : '',
+        availableTailNumbers: missionTailNumbersInput ? missionTailNumbersInput.value.trim() : ''
     };
 }
 
@@ -393,6 +412,22 @@ function getDateTimestamp(date) {
     return date instanceof Date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
 }
 
+function clearMissionCardFocusHighlight() {
+    if (missionCardFocusTimeout !== null) {
+        clearTimeout(missionCardFocusTimeout);
+        missionCardFocusTimeout = null;
+    }
+
+    if (focusedMissionCardId === null) return;
+
+    const focusedCard = document.getElementById(`card-${focusedMissionCardId}`);
+    if (focusedCard) {
+        focusedCard.classList.remove('focus-highlight');
+    }
+
+    focusedMissionCardId = null;
+}
+
 function formatTooltipDateTime(date) {
     return date instanceof Date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : 'TBD';
 }
@@ -526,11 +561,58 @@ function ensureCurrentTimeBubbleStrip() {
     if (!currentTimeBubbleStrip) {
         currentTimeBubbleStrip = document.createElement('div');
         currentTimeBubbleStrip.id = 'current-time-bubble-strip';
-        currentTimeBubbleStrip.setAttribute('aria-hidden', 'true');
         timelineWrapper.insertAdjacentElement('afterend', currentTimeBubbleStrip);
     }
 
+    currentTimeBubbleStrip.removeAttribute('aria-hidden');
+    currentTimeBubbleStrip.style.display = 'block';
+    currentTimeBubbleStrip.style.visibility = 'visible';
+    currentTimeBubbleStrip.style.position = 'relative';
+    currentTimeBubbleStrip.style.height = `${CURRENT_TIME_BUBBLE_HEIGHT_PX}px`;
+    currentTimeBubbleStrip.style.overflow = 'visible';
+    currentTimeBubbleStrip.style.pointerEvents = 'none';
     return currentTimeBubbleStrip;
+}
+
+function applyCurrentTimeBubbleStyles(bubble) {
+    bubble.style.position = 'absolute';
+    bubble.style.left = '0';
+    bubble.style.bottom = '0';
+    bubble.style.transform = 'translateX(-50%)';
+    bubble.style.display = 'inline-flex';
+    bubble.style.flexDirection = 'column';
+    bubble.style.alignItems = 'center';
+    bubble.style.justifyContent = 'center';
+    bubble.style.boxSizing = 'border-box';
+    bubble.style.minHeight = `${CURRENT_TIME_BUBBLE_HEIGHT_PX}px`;
+    bubble.style.padding = '4px 8px 5px';
+    bubble.style.border = '1px solid #007bff';
+    bubble.style.borderRadius = '999px';
+    bubble.style.background = 'rgba(255,255,255,0.98)';
+    bubble.style.color = '#007bff';
+    bubble.style.fontSize = '0.7rem';
+    bubble.style.fontWeight = '800';
+    bubble.style.lineHeight = '1.05';
+    bubble.style.whiteSpace = 'nowrap';
+    bubble.style.boxShadow = '0 1px 3px rgba(0,0,0,0.15)';
+    bubble.style.zIndex = '31';
+    bubble.style.pointerEvents = 'auto';
+    bubble.style.textAlign = 'center';
+    bubble.style.visibility = 'visible';
+    bubble.style.cursor = 'pointer';
+}
+
+function snapToThreeDayOutlook() {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 4);
+    end.setHours(23, 59, 59, 999);
+
+    viewStart = start.getTime();
+    viewEnd = end.getTime();
+
+    renderTimeline();
 }
 
 function syncCurrentTimeIndicator() {
@@ -562,6 +644,8 @@ function syncCurrentTimeIndicator() {
 
     if (strip) {
         strip.hidden = false;
+        strip.style.display = 'block';
+        strip.style.visibility = 'visible';
         const sidebar = document.querySelector('.timeline-sidebar');
         const sidebarWidth = sidebar ? sidebar.getBoundingClientRect().width : 0;
         const viewportWidth = viewport ? viewport.getBoundingClientRect().width : 0;
@@ -574,10 +658,20 @@ function syncCurrentTimeIndicator() {
         if (!bubble) {
             bubble = document.createElement('div');
             bubble.className = 'current-time-bubble';
-            bubble.setAttribute('aria-hidden', 'true');
+            bubble.setAttribute('role', 'button');
+            bubble.setAttribute('tabindex', '0');
+            bubble.setAttribute('aria-label', 'Snap timeline to 3-day outlook');
+            bubble.addEventListener('click', snapToThreeDayOutlook);
+            bubble.addEventListener('keydown', event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    snapToThreeDayOutlook();
+                }
+            });
             strip.appendChild(bubble);
         }
 
+        applyCurrentTimeBubbleStyles(bubble);
         bubble.style.left = `${nowPct}%`;
         const zuluLine = document.createElement('span');
         zuluLine.className = 'current-time-bubble-line current-time-bubble-utc';
@@ -587,7 +681,9 @@ function syncCurrentTimeIndicator() {
         localLine.className = 'current-time-bubble-line current-time-bubble-local';
         localLine.textContent = formatLocalMilitaryTime(now);
 
-        bubble.replaceChildren(zuluLine, localLine);
+        bubble.textContent = '';
+        bubble.appendChild(zuluLine);
+        bubble.appendChild(localLine);
     }
 }
 
@@ -1060,7 +1156,7 @@ function buildMissionDataFromForm() {
         timeValid,
         missionData: {
             missionNum: document.getElementById('missionNum').value.toUpperCase(),
-            tailNum: document.getElementById('tailNum').value,
+            tailNum: normalizeMissionText(document.getElementById('tailNum').value),
             pilot: document.getElementById('pilot').value,
             copilot: document.getElementById('copilot').value,
             crewChief: document.getElementById('crewChief').value,
@@ -1102,6 +1198,77 @@ function getMissionHomeField() {
     return (missionDefaults.homeField || '').trim().toUpperCase();
 }
 
+function parseTailNumberList(value) {
+    const source = Array.isArray(value)
+        ? value
+        : String(value || '').split(/[\n,;]+/);
+
+    const seen = new Set();
+    const tails = [];
+
+    source.forEach(entry => {
+        const tail = normalizeMissionText(entry);
+        if (!tail) return;
+
+        const key = tail.toUpperCase();
+        if (seen.has(key)) return;
+
+        seen.add(key);
+        tails.push(tail);
+    });
+
+    return tails;
+}
+
+function getAvailableTailNumbers(selectedTail = '') {
+    const configuredTails = parseTailNumberList(missionDefaults.availableTailNumbers);
+    const selected = normalizeMissionText(selectedTail);
+
+    if (!selected) return configuredTails;
+
+    const selectedKey = selected.toUpperCase();
+    if (configuredTails.some(tail => tail.toUpperCase() === selectedKey)) {
+        return configuredTails;
+    }
+
+    return [selected, ...configuredTails];
+}
+
+function registerAvailableTailNumber(tailNumber) {
+    const tail = normalizeMissionText(tailNumber);
+    if (!tail) return false;
+
+    const tailNumbers = parseTailNumberList(missionDefaults.availableTailNumbers);
+    const tailKey = tail.toUpperCase();
+    if (tailNumbers.some(item => item.toUpperCase() === tailKey)) {
+        return false;
+    }
+
+    tailNumbers.push(tail);
+    missionDefaults.availableTailNumbers = tailNumbers.join('\n');
+    syncMissionDefaultsForm();
+    persistMissionDefaults();
+    syncTailNumberSelect(tail);
+    return true;
+}
+
+function syncTailNumberSelect(selectedTail = null) {
+    const tailInput = document.getElementById('tailNum');
+    const tailOptions = document.getElementById('tailNumOptions');
+    if (!tailInput || !tailOptions) return;
+
+    const desiredTail = normalizeMissionText(selectedTail !== null ? selectedTail : tailInput.value);
+    const tailNumbers = getAvailableTailNumbers(desiredTail);
+
+    tailOptions.innerHTML = tailNumbers.map(tail => `<option value="${escapeHtml(tail)}"></option>`).join('');
+
+    if (desiredTail) {
+        tailInput.value = desiredTail;
+    } else {
+        tailInput.value = '';
+    }
+}
+
 function createDateTimeLocal(daysAhead, hour, minute) {
     const date = new Date();
     date.setDate(date.getDate() + daysAhead);
@@ -1113,6 +1280,19 @@ function parseDateTimeLocalValue(value) {
     if (!value) return null;
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function syncLegLandTimeFromTakeoff(legNode) {
+    const takeoffInput = legNode.querySelector('.leg-tk-time');
+    const landInput = legNode.querySelector('.leg-ld-time');
+    if (!takeoffInput || !landInput) return;
+
+    const takeoffTime = parseDateTimeLocalValue(takeoffInput.value);
+    if (!takeoffTime) return;
+
+    const landTime = new Date(takeoffTime);
+    landTime.setHours(landTime.getHours() + 3);
+    landInput.value = toDateTimeLocal(landTime);
 }
 
 function getInitialLegDefaults() {
@@ -1329,6 +1509,7 @@ function renderTimeline() {
     
     // Highlight current day
     const now = new Date();
+    const nowTime = now.getTime();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const tomorrowStart = todayStart + MS_PER_DAY;
 
@@ -1568,6 +1749,7 @@ function renderTimeline() {
 
 function renderMissionCards() {
     const list = document.getElementById('mission-list');
+    clearMissionCardFocusHighlight();
     list.innerHTML = '';
     const sorted = [...missions].sort((a, b) => getMissionTimes(b).start - getMissionTimes(a).start);
 
@@ -1656,11 +1838,23 @@ function locateMission(id, event) {
 }
 
 function focusMissionCard(id) {
+    clearMissionCardFocusHighlight();
+
     const card = document.getElementById(`card-${id}`);
     if (!card) return;
 
-    card.classList.add('highlight');
+    focusedMissionCardId = id;
+    card.classList.remove('highlight');
+    card.classList.add('focus-highlight');
     card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    missionCardFocusTimeout = window.setTimeout(() => {
+        if (focusedMissionCardId !== id) return;
+
+        card.classList.remove('focus-highlight');
+        focusedMissionCardId = null;
+        missionCardFocusTimeout = null;
+    }, 5000);
 }
 
 function deleteMission(id, event) {
@@ -1750,12 +1944,17 @@ missionDefaultsForm.addEventListener('input', event => {
     }
     missionDefaults = readMissionDefaultsForm();
     persistMissionDefaults();
+
+    if (event.target === missionTailNumbersInput) {
+        syncTailNumberSelect(document.getElementById('tailNum')?.value || '');
+    }
 });
 
 document.getElementById('btn-clear-defaults').addEventListener('click', () => {
     missionDefaults = createEmptyMissionDefaults();
     persistMissionDefaults();
     syncMissionDefaultsForm();
+    syncTailNumberSelect('');
     void clearStoredMissionDataHandle();
 });
 
@@ -1914,6 +2113,12 @@ function addLegRow(legData = null) {
         div.remove();
         syncEditingMissionPreview();
     });
+    const takeoffTimeInput = div.querySelector('.leg-tk-time');
+    if (takeoffTimeInput) {
+        const updateLandTime = () => syncLegLandTimeFromTakeoff(div);
+        takeoffTimeInput.addEventListener('input', updateLandTime);
+        takeoffTimeInput.addEventListener('change', updateLandTime);
+    }
     legsWrapper.appendChild(div);
     if (!legData) syncEditingMissionPreview();
 }
@@ -1930,6 +2135,7 @@ document.getElementById('btn-new-mission').addEventListener('click', () => {
     missionForm.reset();
     document.getElementById('editMissionId').value = "";
     legsWrapper.innerHTML = '';
+    syncTailNumberSelect('');
     addLegRow();
     document.getElementById('modal-title').innerText = "New Mission";
     document.getElementById('btn-submit-form').innerText = "Create Mission";
@@ -1971,7 +2177,7 @@ function openEditModal(mission) {
     startEditSession(mission);
     document.getElementById('editMissionId').value = mission.id;
     document.getElementById('missionNum').value = mission.missionNum;
-    document.getElementById('tailNum').value = mission.tailNum;
+    syncTailNumberSelect(mission.tailNum);
     document.getElementById('pilot').value = mission.pilot;
     document.getElementById('copilot').value = mission.copilot;
     document.getElementById('crewChief').value = mission.crewChief;
@@ -1995,6 +2201,12 @@ missionForm.addEventListener('submit', function(e) {
     if (!hasLegs) return alert("You must add at least one flight leg.");
     if (!timeValid) return alert("Landing time must be after takeoff time for all legs.");
     missionData.legs.sort((a, b) => a.takeoffTime - b.takeoffTime);
+
+    const tailNum = normalizeMissionText(missionData.tailNum);
+    missionData.tailNum = tailNum;
+    if (tailNum) {
+        registerAvailableTailNumber(tailNum);
+    }
 
     const editId = document.getElementById('editMissionId').value;
     const committedMissionId = editId || null;

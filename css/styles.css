@@ -204,8 +204,8 @@
     }
 
     .year-label {
-        z-index: 35; position: absolute; top: 6px; background: rgba(255,255,255,0.98); padding: 4px 14px;
-        border-radius: 12px; border: 2px solid #000; font-size: 0.85rem; font-weight: 800; color: #000;
+        z-index: 35; position: absolute; top: 6px; background: rgba(255,255,255,0.98); padding: 2px 10px;
+        border-radius: 12px; border: 1px solid #000; font-size: 0.85rem; font-weight: 700; color: #000;
         white-space: nowrap; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.12);
     }
 
@@ -213,6 +213,7 @@
         z-index: 30; position: absolute; top: 4px; transform: translateX(-50%); background: rgba(255,255,255,0.95);
         padding: 2px 10px; border-radius: 12px; border: 1px solid var(--border-color); font-size: 0.8rem;
         font-weight: 700; color: var(--primary); white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        cursor: pointer;
     }
 
     /* Tail Row & Label Styling */
@@ -355,8 +356,9 @@
         padding: 15px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); cursor: pointer; transition: all 0.2s ease-in-out;
     }
     .mission-card:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.15); transform: translateY(-2px); }
-    .mission-card.highlight { border-left-color: var(--highlight); background-color: var(--highlight-bg); box-shadow: 0 4px 12px rgba(255, 193, 7, 0.3); }
-    .mission-card.no-crew { background-color: var(--alert-bg); border-left-color: var(--alert-border); }
+    .mission-card.no-crew { border-left-color: var(--danger); }
+    .mission-card.highlight,
+    .mission-card.focus-highlight { border-left-color: var(--highlight); background-color: var(--highlight-bg); box-shadow: 0 4px 12px rgba(255, 193, 7, 0.3); }
 
     .card-col { flex: 1; border-right: 1px dashed var(--border-color); padding-right: 12px; }
     .card-col:last-child { border-right: none; padding-right: 0; }
@@ -388,7 +390,8 @@
     .close { float: right; font-size: 1.5rem; font-weight: bold; cursor: pointer; color: var(--text-muted); }
     .close:hover { color: var(--text-main); }
     form label { display: block; margin-top: 10px; font-weight: bold; font-size: 0.9rem; }
-    form input { width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; }
+    form input, form select, form textarea { width: 100%; padding: 8px; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 4px; font: inherit; }
+    form textarea { min-height: 80px; resize: vertical; }
     .form-row { display: flex; gap: 15px; }
     .form-col { flex: 1; }
         .form-section-title { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; margin-bottom: 15px; font-size: 1.1rem; color: var(--primary); border-bottom: 1px solid var(--border-color); padding-bottom: 5px;}
