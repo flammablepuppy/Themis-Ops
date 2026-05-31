@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": 3,
-  "updatedAt": "2026-05-30T20:43:20.247Z",
+  "revision": 5,
+  "updatedAt": "2026-05-31T04:07:18.117Z",
   "updatedBy": "ops-82a53235-683a-4293-9c13-c267ba5dfb10",
   "missions": [
     {
@@ -59,9 +59,9 @@
       ]
     },
     {
-      "id": "mission-993b5887-6c8a-44e0-a40c-9c5bf2cddcd0",
-      "missionNum": "DELETE THIS MISSION IF YOU CAN SEE IT.",
-      "tailNum": "Glenn Check",
+      "id": "mission-88d4bc19-0b16-40c5-8bde-e8ded328e09f",
+      "missionNum": "ILNDR1",
+      "tailNum": "166036",
       "pilot": "",
       "copilot": "",
       "crewChief": "",
@@ -74,7 +74,7 @@
         {
           "takeoffIcao": "KNUW",
           "takeoffTime": "2026-05-31T16:00:00.000Z",
-          "landIcao": "KNUW",
+          "landIcao": "LICZ",
           "landTime": "2026-05-31T19:30:00.000Z"
         }
       ]
@@ -93,11 +93,17 @@
       "deletedAt": "",
       "deletedBy": ""
     },
-    "mission-993b5887-6c8a-44e0-a40c-9c5bf2cddcd0": {
-      "updatedAt": "2026-05-30T20:43:20.240Z",
+    "mission-88d4bc19-0b16-40c5-8bde-e8ded328e09f": {
+      "updatedAt": "2026-05-31T04:07:18.111Z",
       "updatedBy": "ops-82a53235-683a-4293-9c13-c267ba5dfb10",
       "deletedAt": "",
       "deletedBy": ""
+    },
+    "mission-993b5887-6c8a-44e0-a40c-9c5bf2cddcd0": {
+      "updatedAt": "2026-05-30T20:43:20.240Z",
+      "updatedBy": "ops-82a53235-683a-4293-9c13-c267ba5dfb10",
+      "deletedAt": "2026-05-31T04:05:50.411Z",
+      "deletedBy": "ops-82a53235-683a-4293-9c13-c267ba5dfb10"
     }
   }
 }

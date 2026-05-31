@@ -38,13 +38,22 @@ const missionOneDriveItemIdInput = document.getElementById('defaultOneDriveItemI
 const missionOneDriveItemETagInput = document.getElementById('defaultOneDriveItemETag');
 const missionOneDriveStatusInput = document.getElementById('onedrive-sync-status');
 const oneDriveStatusPanel = document.getElementById('onedrive-sync-status-panel');
+const missionGoogleDriveClientIdInput = document.getElementById('defaultGoogleDriveClientId');
+const missionGoogleDriveFileNameInput = document.getElementById('defaultGoogleDriveFileName');
+const missionGoogleDriveFolderIdInput = document.getElementById('defaultGoogleDriveFolderId');
+const missionGoogleDriveFileIdInput = document.getElementById('defaultGoogleDriveFileId');
+const missionGoogleDriveStatusInput = document.getElementById('googledrive-sync-status');
+const googleDriveStatusPanel = document.getElementById('googledrive-sync-status-panel');
 const localSyncSettingsContainer = document.getElementById('local-sync-settings');
 const sharePointSyncSettingsContainer = document.getElementById('sharepoint-sync-settings');
 const oneDriveSyncSettingsContainer = document.getElementById('onedrive-sync-settings');
+const googleDriveSyncSettingsContainer = document.getElementById('googledrive-sync-settings');
 const sharePointConnectButton = document.getElementById('btn-sharepoint-connect');
 const sharePointSyncNowButton = document.getElementById('btn-sharepoint-sync-now');
 const oneDriveConnectButton = document.getElementById('btn-onedrive-connect');
 const oneDriveSyncNowButton = document.getElementById('btn-onedrive-sync-now');
+const googleDriveConnectButton = document.getElementById('btn-googledrive-connect');
+const googleDriveSyncNowButton = document.getElementById('btn-googledrive-sync-now');
 const DEFAULTS_STORAGE_KEY = 'themis-ops-mission-defaults';
 const MISSIONS_STORAGE_KEY = 'themis-ops-missions';
 const MISSION_DATA_HANDLE_DB_NAME = 'themis-ops-mission-data';
@@ -55,9 +64,13 @@ const MISSION_CANONICAL_CLIENT_ID_KEY = 'themis-ops-mission-client-id';
 const MISSION_CANONICAL_SYNC_POLL_MS = 2000;
 const MISSION_SHAREPOINT_SYNC_POLL_MS = 5000;
 const MISSION_ONEDRIVE_SYNC_POLL_MS = 5000;
+const MISSION_GOOGLEDRIVE_SYNC_POLL_MS = 5000;
 const SHAREPOINT_CANONICAL_ITEM_TITLE = 'Themis Operations';
 const SHAREPOINT_DEFAULT_PAYLOAD_FIELD = 'Payload';
 const SHAREPOINT_GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
+const GOOGLE_DRIVE_API_BASE_URL = 'https://www.googleapis.com/drive/v3';
+const GOOGLE_DRIVE_UPLOAD_BASE_URL = 'https://www.googleapis.com/upload/drive/v3';
+const GOOGLE_DRIVE_CANONICAL_FILE_MIME_TYPE = 'application/json';
 let missionDefaults = createEmptyMissionDefaults();
 const tabButtons = document.querySelectorAll('.app-tab');
 let airportData = {};
@@ -107,6 +120,18 @@ let oneDriveWriteQueue = Promise.resolve();
 let oneDriveWriteInFlight = false;
 let oneDriveReloadInProgress = false;
 let oneDriveSyncTimer = null;
+let googleDriveAuthClient = null;
+let googleDriveAuthConfigSignature = '';
+let googleDriveAccessToken = '';
+let googleDriveAccessTokenExpiresAt = 0;
+let googleDriveTokenRequest = null;
+let googleDriveTokenRequestPromise = null;
+let googleDriveResolvedFileId = '';
+let googleDriveResolvedFileSignature = '';
+let googleDriveWriteQueue = Promise.resolve();
+let googleDriveWriteInFlight = false;
+let googleDriveReloadInProgress = false;
+let googleDriveSyncTimer = null;
 let currentTimeBubbleStrip = null;
 let currentTimeIndicatorRefreshTimer = null;
 let missionCardFocusTimeout = null;
@@ -134,6 +159,10 @@ function createEmptyMissionDefaults() {
         oneDriveRedirectUri: '',
         oneDriveItemId: '',
         oneDriveItemETag: '',
+        googleDriveClientId: '164691062517-j5flaa234p213pdspid9p045jtkh5pp3.apps.googleusercontent.com',
+        googleDriveFileName: 'themis_operations_missions.json',
+        googleDriveFolderId: '',
+        googleDriveFileId: '',
         sharePointTenantId: '',
         sharePointClientId: '',
         sharePointSiteId: '',
@@ -158,7 +187,7 @@ function normalizeTailNumbersField(value) {
 }
 
 function normalizeMissionSyncBackend(value) {
-    return value === 'local-file' || value === 'sharepoint-list' || value === 'onedrive-file'
+    return value === 'local-file' || value === 'sharepoint-list' || value === 'onedrive-file' || value === 'google-drive-file'
         ? value
         : 'local-file';
 }
@@ -198,6 +227,12 @@ function loadMissionDefaults() {
         const oneDriveItemETag = typeof parsed.oneDriveItemETag === 'string' && parsed.oneDriveItemETag.trim()
             ? parsed.oneDriveItemETag.trim()
             : legacyOneDriveItemETag;
+        const googleDriveClientId = typeof parsed.googleDriveClientId === 'string' ? parsed.googleDriveClientId.trim() : '';
+        const googleDriveFileName = typeof parsed.googleDriveFileName === 'string' && parsed.googleDriveFileName.trim()
+            ? parsed.googleDriveFileName.trim()
+            : 'themis_operations_missions.json';
+        const googleDriveFolderId = typeof parsed.googleDriveFolderId === 'string' ? parsed.googleDriveFolderId.trim() : '';
+        const googleDriveFileId = typeof parsed.googleDriveFileId === 'string' ? parsed.googleDriveFileId.trim() : '';
         const sharePointTenantId = typeof parsed.sharePointTenantId === 'string' ? parsed.sharePointTenantId.trim() : '';
         const sharePointClientId = typeof parsed.sharePointClientId === 'string' ? parsed.sharePointClientId.trim() : '';
         const sharePointSiteId = typeof parsed.sharePointSiteId === 'string' ? parsed.sharePointSiteId.trim() : '';
@@ -222,6 +257,10 @@ function loadMissionDefaults() {
             oneDriveRedirectUri,
             oneDriveItemId,
             oneDriveItemETag,
+            googleDriveClientId,
+            googleDriveFileName,
+            googleDriveFolderId,
+            googleDriveFileId,
             sharePointTenantId,
             sharePointClientId,
             sharePointSiteId,
@@ -705,6 +744,10 @@ function getMissionSyncPollIntervalMs() {
         return MISSION_ONEDRIVE_SYNC_POLL_MS;
     }
 
+    if (isGoogleDriveSyncMode()) {
+        return MISSION_GOOGLEDRIVE_SYNC_POLL_MS;
+    }
+
     return MISSION_CANONICAL_SYNC_POLL_MS;
 }
 
@@ -714,6 +757,10 @@ function isSharePointSyncMode() {
 
 function isOneDriveSyncMode() {
     return getMissionSyncMode() === 'onedrive-file';
+}
+
+function isGoogleDriveSyncMode() {
+    return getMissionSyncMode() === 'google-drive-file';
 }
 
 function isLocalFileSyncMode() {
@@ -727,6 +774,10 @@ async function syncMissionCanonicalDocumentFromActiveBackend(options = {}) {
 
     if (isOneDriveSyncMode()) {
         return syncMissionCanonicalDocumentFromOneDriveFile(options);
+    }
+
+    if (isGoogleDriveSyncMode()) {
+        return syncMissionCanonicalDocumentFromGoogleDriveFile(options);
     }
 
     return syncMissionCanonicalDocumentFromHandle(options);
@@ -801,9 +852,14 @@ function syncMissionDefaultsForm() {
     if (missionSharePointRedirectUriInput) missionSharePointRedirectUriInput.value = missionDefaults.sharePointRedirectUri ?? '';
     if (missionSharePointItemIdInput) missionSharePointItemIdInput.value = missionDefaults.sharePointItemId ?? '';
     if (missionSharePointItemETagInput) missionSharePointItemETagInput.value = missionDefaults.sharePointItemETag ?? '';
+    if (missionGoogleDriveClientIdInput) missionGoogleDriveClientIdInput.value = missionDefaults.googleDriveClientId ?? '';
+    if (missionGoogleDriveFileNameInput) missionGoogleDriveFileNameInput.value = missionDefaults.googleDriveFileName || 'themis_operations_missions.json';
+    if (missionGoogleDriveFolderIdInput) missionGoogleDriveFolderIdInput.value = missionDefaults.googleDriveFolderId ?? '';
+    if (missionGoogleDriveFileIdInput) missionGoogleDriveFileIdInput.value = missionDefaults.googleDriveFileId ?? '';
     toggleMissionSyncSettingsVisibility();
     updateSharePointStatusFromState();
     updateOneDriveStatusFromState();
+    updateGoogleDriveStatusFromState();
 }
 
 function readMissionDefaultsForm() {
@@ -819,6 +875,10 @@ function readMissionDefaultsForm() {
         oneDriveRedirectUri: missionOneDriveRedirectUriInput ? missionOneDriveRedirectUriInput.value.trim() : '',
         oneDriveItemId: missionOneDriveItemIdInput ? missionOneDriveItemIdInput.value.trim() : '',
         oneDriveItemETag: missionOneDriveItemETagInput ? missionOneDriveItemETagInput.value.trim() : '',
+        googleDriveClientId: missionGoogleDriveClientIdInput ? missionGoogleDriveClientIdInput.value.trim() : '',
+        googleDriveFileName: missionGoogleDriveFileNameInput ? (missionGoogleDriveFileNameInput.value.trim() || 'themis_operations_missions.json') : 'themis_operations_missions.json',
+        googleDriveFolderId: missionGoogleDriveFolderIdInput ? missionGoogleDriveFolderIdInput.value.trim() : '',
+        googleDriveFileId: missionGoogleDriveFileIdInput ? missionGoogleDriveFileIdInput.value.trim() : '',
         sharePointTenantId: missionSharePointTenantIdInput ? missionSharePointTenantIdInput.value.trim() : '',
         sharePointClientId: missionSharePointClientIdInput ? missionSharePointClientIdInput.value.trim() : '',
         sharePointSiteId: missionSharePointSiteIdInput ? missionSharePointSiteIdInput.value.trim() : '',
@@ -835,6 +895,7 @@ function toggleMissionSyncSettingsVisibility() {
     const localFileMode = isLocalFileSyncMode();
     const sharePointMode = isSharePointSyncMode();
     const oneDriveMode = isOneDriveSyncMode();
+    const googleDriveMode = isGoogleDriveSyncMode();
 
     if (localSyncSettingsContainer) {
         localSyncSettingsContainer.hidden = !localFileMode;
@@ -856,6 +917,14 @@ function toggleMissionSyncSettingsVisibility() {
         oneDriveStatusPanel.hidden = !oneDriveMode;
     }
 
+    if (googleDriveSyncSettingsContainer) {
+        googleDriveSyncSettingsContainer.hidden = !googleDriveMode;
+    }
+
+    if (googleDriveStatusPanel) {
+        googleDriveStatusPanel.hidden = !googleDriveMode;
+    }
+
     const missionDataButton = document.getElementById('btn-choose-mission-data-file');
     if (missionDataPathInput) missionDataPathInput.disabled = !localFileMode;
     if (missionDataButton) missionDataButton.disabled = !localFileMode;
@@ -863,6 +932,8 @@ function toggleMissionSyncSettingsVisibility() {
     if (sharePointSyncNowButton) sharePointSyncNowButton.disabled = !sharePointMode;
     if (oneDriveConnectButton) oneDriveConnectButton.disabled = !oneDriveMode;
     if (oneDriveSyncNowButton) oneDriveSyncNowButton.disabled = !oneDriveMode;
+    if (googleDriveConnectButton) googleDriveConnectButton.disabled = !googleDriveMode;
+    if (googleDriveSyncNowButton) googleDriveSyncNowButton.disabled = !googleDriveMode;
 }
 
 function activateMissionSyncBackend() {
@@ -884,8 +955,17 @@ function activateMissionSyncBackend() {
         return;
     }
 
+    if (isGoogleDriveSyncMode()) {
+        updateGoogleDriveStatusFromState();
+        if (hasGoogleDriveSyncConfiguration()) {
+            void syncGoogleDriveNow();
+        }
+        return;
+    }
+
     updateSharePointStatusFromState();
     updateOneDriveStatusFromState();
+    updateGoogleDriveStatusFromState();
 
     void loadMissionDataHandle().then(handle => {
         if (handle) {
@@ -963,6 +1043,46 @@ function updateOneDriveStatusFromState(message = null, state = 'idle') {
     }
 
     setOneDriveStatus('OneDrive config incomplete');
+}
+
+function setGoogleDriveStatus(message, state = 'idle') {
+    if (!missionGoogleDriveStatusInput) return;
+    missionGoogleDriveStatusInput.textContent = message;
+    missionGoogleDriveStatusInput.classList.remove('connected', 'error');
+    if (state === 'connected') {
+        missionGoogleDriveStatusInput.classList.add('connected');
+    } else if (state === 'error') {
+        missionGoogleDriveStatusInput.classList.add('error');
+    }
+}
+
+function updateGoogleDriveStatusFromState(message = null, state = 'idle') {
+    if (message) {
+        setGoogleDriveStatus(message, state);
+        return;
+    }
+
+    if (!isGoogleDriveSyncMode()) {
+        setGoogleDriveStatus('Local file sync');
+        return;
+    }
+
+    if (!supportsGoogleDriveSyncTransport()) {
+        setGoogleDriveStatus('Google Drive sync requires a secure browser context.', 'error');
+        return;
+    }
+
+    if (missionDefaults.googleDriveFileId) {
+        setGoogleDriveStatus(`Connected to Google Drive file ${missionDefaults.googleDriveFileName || missionDefaults.googleDriveFileId}`, 'connected');
+        return;
+    }
+
+    if (missionDefaults.googleDriveClientId && missionDefaults.googleDriveFileName) {
+        setGoogleDriveStatus('Google Drive configured, not connected yet');
+        return;
+    }
+
+    setGoogleDriveStatus('Google Drive config incomplete');
 }
 
 function getMissionDataFileName(pathValue) {
@@ -1246,6 +1366,13 @@ function queueMissionCanonicalDocumentWrite(document = null) {
             return Promise.resolve(false);
         }
         return queueOneDriveFileWrite(document);
+    }
+
+    if (isGoogleDriveSyncMode()) {
+        if (!hasGoogleDriveSyncConfiguration()) {
+            return Promise.resolve(false);
+        }
+        return queueGoogleDriveFileWrite(document);
     }
 
     return queueMissionDataDiskWrite(document);
@@ -1872,6 +1999,669 @@ async function syncOneDriveNow() {
     } catch (error) {
         console.warn('OneDrive sync failed.', error);
         setOneDriveStatus(graphErrorMessage(error, 'OneDrive sync failed.'), 'error');
+        return null;
+    }
+}
+
+function supportsGoogleDriveSyncTransport() {
+    return window.isSecureContext
+        && typeof fetch === 'function'
+        && typeof google !== 'undefined'
+        && google.accounts
+        && google.accounts.oauth2
+        && typeof google.accounts.oauth2.initTokenClient === 'function';
+}
+
+function getGoogleDriveClientId() {
+    return missionDefaults.googleDriveClientId ? missionDefaults.googleDriveClientId.trim() : '';
+}
+
+function getGoogleDriveFileName() {
+    const configured = missionDefaults.googleDriveFileName ? missionDefaults.googleDriveFileName.trim() : '';
+    return configured || 'themis_operations_missions.json';
+}
+
+function getGoogleDriveFolderId() {
+    return missionDefaults.googleDriveFolderId ? missionDefaults.googleDriveFolderId.trim() : '';
+}
+
+function getGoogleDriveAuthConfigSignature() {
+    return getGoogleDriveClientId();
+}
+
+function getGoogleDriveResolutionSignature() {
+    return [getGoogleDriveFileName(), getGoogleDriveFolderId()].join('|');
+}
+
+function hasGoogleDriveSyncConfiguration() {
+    return Boolean(getGoogleDriveClientId() && getGoogleDriveFileName());
+}
+
+function getGoogleDriveScopes() {
+    return ['https://www.googleapis.com/auth/drive'];
+}
+
+function getGoogleDriveAuthErrorMessage(response, fallback = 'Google Drive authorization failed.') {
+    const errorText = [
+        response && typeof response.error === 'string' ? response.error : '',
+        response && typeof response.error_description === 'string' ? response.error_description : '',
+        response && typeof response.message === 'string' ? response.message : ''
+    ].join(' ').toLowerCase();
+
+    if (errorText.includes('invalid_client') || errorText.includes('origin_mismatch')) {
+        return 'Google rejected the OAuth client. Use a Google OAuth 2.0 Web browser client ID and add this page origin to Authorized JavaScript origins in Google Cloud.';
+    }
+
+    if (errorText.includes('deleted_client')) {
+        return 'The Google OAuth client was deleted. Create or restore the client ID in Google Cloud.';
+    }
+
+    if (errorText.includes('org_internal')) {
+        return 'This Google OAuth client is restricted to a Google Workspace organization.';
+    }
+
+    return response && typeof response.error_description === 'string' && response.error_description.trim()
+        ? response.error_description.trim()
+        : (response && typeof response.error === 'string' && response.error.trim()
+            ? response.error.trim()
+            : fallback);
+}
+
+function resetGoogleDriveAuthClient() {
+    googleDriveAuthClient = null;
+    googleDriveAuthConfigSignature = '';
+    googleDriveAccessToken = '';
+    googleDriveAccessTokenExpiresAt = 0;
+    if (googleDriveTokenRequest) {
+        const pending = googleDriveTokenRequest;
+        googleDriveTokenRequest = null;
+        googleDriveTokenRequestPromise = null;
+        try {
+            pending.reject(new Error('Google Drive authentication was reset.'));
+        } catch {
+            // Ignore promise rejection handling failures.
+        }
+    }
+}
+
+function buildGoogleDriveFileResourceFields() {
+    return 'id,name,modifiedTime,version,md5Checksum,size,parents';
+}
+
+function buildGoogleDriveFilesPath() {
+    return '/files';
+}
+
+function buildGoogleDriveFileMetadataPathById(fileId) {
+    const query = new URLSearchParams();
+    query.set('supportsAllDrives', 'true');
+    query.set('fields', buildGoogleDriveFileResourceFields());
+    return `/files/${encodeURIComponent(String(fileId))}?${query.toString()}`;
+}
+
+function buildGoogleDriveFileDownloadPathById(fileId) {
+    const query = new URLSearchParams();
+    query.set('supportsAllDrives', 'true');
+    query.set('alt', 'media');
+    return `/files/${encodeURIComponent(String(fileId))}?${query.toString()}`;
+}
+
+function buildGoogleDriveFileUploadPathById(fileId) {
+    const query = new URLSearchParams();
+    query.set('supportsAllDrives', 'true');
+    query.set('uploadType', 'media');
+    query.set('fields', buildGoogleDriveFileResourceFields());
+    return `/files/${encodeURIComponent(String(fileId))}?${query.toString()}`;
+}
+
+function buildGoogleDriveFileCreatePath() {
+    const query = new URLSearchParams();
+    query.set('supportsAllDrives', 'true');
+    query.set('fields', buildGoogleDriveFileResourceFields());
+    return `/files?${query.toString()}`;
+}
+
+function escapeGoogleDriveQueryString(value) {
+    return String(value)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'");
+}
+
+function buildGoogleDriveFileSearchQuery() {
+    const clauses = [
+        `name = '${escapeGoogleDriveQueryString(getGoogleDriveFileName())}'`,
+        'trashed = false'
+    ];
+
+    const folderId = getGoogleDriveFolderId();
+    if (folderId) {
+        clauses.push(`'${escapeGoogleDriveQueryString(folderId)}' in parents`);
+    }
+
+    return clauses.join(' and ');
+}
+
+async function getGoogleDriveAuthClient() {
+    const signature = getGoogleDriveAuthConfigSignature();
+    if (googleDriveAuthClient && googleDriveAuthConfigSignature === signature) {
+        return googleDriveAuthClient;
+    }
+
+    if (!supportsGoogleDriveSyncTransport()) {
+        throw new Error('Google Drive sync requires Google Identity Services in a secure browser context.');
+    }
+
+    const clientId = getGoogleDriveClientId();
+    if (!clientId) {
+        throw new Error('Google Drive client ID is required.');
+    }
+
+    googleDriveAuthClient = google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: getGoogleDriveScopes().join(' '),
+        callback: response => {
+            const pending = googleDriveTokenRequest;
+            googleDriveTokenRequest = null;
+            googleDriveTokenRequestPromise = null;
+
+            if (response && response.access_token) {
+                googleDriveAccessToken = response.access_token;
+                googleDriveAccessTokenExpiresAt = Date.now() + ((Number(response.expires_in) || 0) * 1000);
+                if (pending) {
+                    pending.resolve(response.access_token);
+                }
+                return;
+            }
+
+            googleDriveAccessToken = '';
+            googleDriveAccessTokenExpiresAt = 0;
+            const message = getGoogleDriveAuthErrorMessage(response, 'Google Drive access token request failed.');
+            if (pending) {
+                pending.reject(new Error(message));
+            }
+        }
+    });
+    googleDriveAuthConfigSignature = signature;
+    googleDriveAccessToken = '';
+    googleDriveAccessTokenExpiresAt = 0;
+    return googleDriveAuthClient;
+}
+
+async function getGoogleDriveAccessToken(options = {}) {
+    const interactive = Boolean(options.interactive);
+    const cachedTokenIsValid = googleDriveAccessToken && googleDriveAccessTokenExpiresAt > Date.now() + 60000;
+    if (cachedTokenIsValid) {
+        return googleDriveAccessToken;
+    }
+
+    if (googleDriveTokenRequestPromise) {
+        return googleDriveTokenRequestPromise;
+    }
+
+    const client = await getGoogleDriveAuthClient();
+
+    let resolveToken;
+    let rejectToken;
+    googleDriveTokenRequestPromise = new Promise((resolve, reject) => {
+        resolveToken = resolve;
+        rejectToken = reject;
+    });
+    googleDriveTokenRequest = { resolve: resolveToken, reject: rejectToken };
+
+    try {
+        client.requestAccessToken({
+            prompt: interactive ? 'consent' : ''
+        });
+    } catch (error) {
+        googleDriveTokenRequest = null;
+        googleDriveTokenRequestPromise = null;
+        rejectToken(error);
+    }
+
+    return googleDriveTokenRequestPromise;
+}
+
+async function googleDriveRequest(path, options = {}) {
+    const token = await getGoogleDriveAccessToken({ interactive: Boolean(options.interactive) });
+    if (!token) return null;
+
+    const headers = new Headers(options.headers || {});
+    headers.set('Authorization', `Bearer ${token}`);
+    if (options.body != null && !headers.has('Content-Type') && options.method && options.method !== 'GET' && options.method !== 'HEAD') {
+        headers.set('Content-Type', 'application/json; charset=utf-8');
+    }
+
+    const response = await fetch(`${options.baseUrl || GOOGLE_DRIVE_API_BASE_URL}${path}`, {
+        method: options.method || 'GET',
+        headers,
+        body: options.body,
+        cache: 'no-store'
+    });
+
+    const responseText = await response.text();
+    let responseBody = null;
+    if (responseText && options.responseType !== 'text') {
+        try {
+            responseBody = JSON.parse(responseText);
+        } catch {
+            responseBody = responseText;
+        }
+    }
+
+    if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+            googleDriveAccessToken = '';
+            googleDriveAccessTokenExpiresAt = 0;
+        }
+        const error = new Error(graphErrorMessage({ body: responseBody, message: response.statusText }, `Google Drive request failed with status ${response.status}.`));
+        error.status = response.status;
+        error.body = responseBody;
+        throw error;
+    }
+
+    if (options.responseType === 'text') {
+        return responseText;
+    }
+
+    if (responseBody == null && response.status === 204) {
+        return {};
+    }
+
+    if (responseBody == null && responseText) {
+        try {
+            return JSON.parse(responseText);
+        } catch {
+            return responseText;
+        }
+    }
+
+    return responseBody;
+}
+
+function updateGoogleDriveItemReference(record) {
+    const fileId = record && record.id != null ? String(record.id) : '';
+    let changed = false;
+
+    if ((missionDefaults.googleDriveFileId || '') !== fileId) {
+        missionDefaults.googleDriveFileId = fileId;
+        changed = true;
+    }
+
+    if (fileId) {
+        googleDriveResolvedFileId = fileId;
+        googleDriveResolvedFileSignature = getGoogleDriveResolutionSignature();
+    }
+
+    if (changed) {
+        syncMissionDefaultsForm();
+        persistMissionDefaults();
+    }
+}
+
+function clearGoogleDriveItemReference() {
+    let changed = false;
+    if (missionDefaults.googleDriveFileId) {
+        missionDefaults.googleDriveFileId = '';
+        changed = true;
+    }
+
+    googleDriveResolvedFileId = '';
+    googleDriveResolvedFileSignature = '';
+
+    if (changed) {
+        syncMissionDefaultsForm();
+        persistMissionDefaults();
+    }
+}
+
+async function findGoogleDriveCanonicalItemRecord(options = {}) {
+    const interactive = Boolean(options.interactive);
+    const targetName = getGoogleDriveFileName();
+    const normalizedTargetName = targetName.trim().toLowerCase();
+    const storedFileId = missionDefaults.googleDriveFileId ? missionDefaults.googleDriveFileId.trim() : '';
+    const resolutionSignature = getGoogleDriveResolutionSignature();
+
+    if (!hasGoogleDriveSyncConfiguration()) return null;
+
+    if (storedFileId) {
+        try {
+            const record = await googleDriveRequest(buildGoogleDriveFileMetadataPathById(storedFileId), {
+                interactive
+            });
+            if (record) {
+                googleDriveResolvedFileId = String(record.id || storedFileId);
+                googleDriveResolvedFileSignature = resolutionSignature;
+                return record;
+            }
+        } catch (error) {
+            if (!error || error.status !== 404) {
+                throw error;
+            }
+        }
+    }
+
+    const query = new URLSearchParams();
+    query.set('q', buildGoogleDriveFileSearchQuery());
+    query.set('pageSize', '10');
+    query.set('fields', `files(${buildGoogleDriveFileResourceFields()}),nextPageToken`);
+    query.set('orderBy', 'modifiedTime desc');
+    query.set('supportsAllDrives', 'true');
+    query.set('includeItemsFromAllDrives', 'true');
+
+    const listing = await googleDriveRequest(`${buildGoogleDriveFilesPath()}?${query.toString()}`, {
+        interactive
+    });
+    const files = listing && Array.isArray(listing.files) ? listing.files : [];
+    const record = files.find(item => item && item.id != null && String(item.name || '').trim().toLowerCase() === normalizedTargetName) || files.find(item => item && item.id != null) || null;
+
+    if (record && record.id != null) {
+        googleDriveResolvedFileId = String(record.id);
+        googleDriveResolvedFileSignature = resolutionSignature;
+    }
+
+    return record;
+}
+
+async function parseGoogleDriveCanonicalDocumentFromRecord(record) {
+    const fileId = record && record.id != null ? String(record.id) : '';
+    const fileName = record && typeof record.name === 'string' && record.name.trim()
+        ? record.name.trim()
+        : getGoogleDriveFileName();
+
+    if (!fileId) {
+        return normalizeMissionCanonicalDocument({
+            schemaVersion: MISSION_CANONICAL_SCHEMA_VERSION,
+            revision: 0,
+            updatedAt: '',
+            updatedBy: '',
+            missions: [],
+            missionSyncMetaById: Object.create(null)
+        }, {
+            sourceSignature: `googledrive:${getGoogleDriveFileName()}:unknown`,
+            sourceWasEmpty: true
+        });
+    }
+
+    const payload = await googleDriveRequest(buildGoogleDriveFileDownloadPathById(fileId), {
+        interactive: false,
+        responseType: 'text'
+    });
+
+    if (payload == null) {
+        throw new Error(`Google Drive file content could not be read for file ${fileName || fileId}.`);
+    }
+
+    if (typeof payload !== 'string') {
+        throw new Error(`Google Drive file content could not be read for file ${fileName || fileId}.`);
+    }
+
+    if (!payload.trim()) {
+        return normalizeMissionCanonicalDocument({
+            schemaVersion: MISSION_CANONICAL_SCHEMA_VERSION,
+            revision: 0,
+            updatedAt: '',
+            updatedBy: '',
+            missions: [],
+            missionSyncMetaById: Object.create(null)
+        }, {
+            sourceSignature: `googledrive:${getGoogleDriveFileName()}:${fileId}`,
+            sourceWasEmpty: true
+        });
+    }
+
+    try {
+        const parsed = JSON.parse(payload);
+        return normalizeMissionCanonicalDocument(parsed, {
+            sourceSignature: `googledrive:${getGoogleDriveFileName()}:${fileId}`,
+            sourceLastModified: record && record.modifiedTime ? new Date(record.modifiedTime).getTime() : 0,
+            sourceSize: record && Number(record.size) ? Number(record.size) : payload.length,
+            sourceWasEmpty: false
+        });
+    } catch {
+        throw new Error(`Google Drive payload is not valid JSON for file ${fileName || fileId}.`);
+    }
+}
+
+async function createGoogleDriveCanonicalItemRecord(document) {
+    const folderId = getGoogleDriveFolderId();
+    const body = {
+        name: getGoogleDriveFileName(),
+        mimeType: GOOGLE_DRIVE_CANONICAL_FILE_MIME_TYPE
+    };
+
+    if (folderId) {
+        body.parents = [folderId];
+    }
+
+    return googleDriveRequest(buildGoogleDriveFileCreatePath(), {
+        method: 'POST',
+        interactive: false,
+        body: JSON.stringify(body)
+    });
+}
+
+async function updateGoogleDriveCanonicalItemRecord(fileId, document) {
+    const uploadPath = buildGoogleDriveFileUploadPathById(fileId);
+    if (!uploadPath) return null;
+
+    return googleDriveRequest(uploadPath, {
+        method: 'PATCH',
+        baseUrl: GOOGLE_DRIVE_UPLOAD_BASE_URL,
+        interactive: false,
+        body: serializeMissionCanonicalDocument(document)
+    });
+}
+
+async function writeGoogleDriveCanonicalDocument(document = null) {
+    if (!hasGoogleDriveSyncConfiguration()) return false;
+    if (googleDriveWriteInFlight) return false;
+
+    const snapshot = normalizeMissionCanonicalDocument(document || missionCanonicalDocument || buildMissionCanonicalDocument());
+    googleDriveWriteInFlight = true;
+
+    try {
+        const latestRemoteRecord = await findGoogleDriveCanonicalItemRecord({ interactive: false });
+        let docToWrite = snapshot;
+        let remoteRecord = latestRemoteRecord || null;
+
+        if (remoteRecord) {
+            const remoteDocument = await parseGoogleDriveCanonicalDocumentFromRecord(remoteRecord);
+            docToWrite = mergeMissionCanonicalDocuments(remoteDocument, snapshot);
+        }
+
+        docToWrite = {
+            ...docToWrite,
+            revision: Math.max(Number(docToWrite.revision) || 0, Number(snapshot.revision) || 0),
+            updatedAt: nowMissionTimestamp(),
+            updatedBy: getMissionSyncClientId()
+        };
+
+        let updatedRecord = null;
+        if (remoteRecord && remoteRecord.id != null) {
+            try {
+                updatedRecord = await updateGoogleDriveCanonicalItemRecord(remoteRecord.id, docToWrite);
+            } catch (error) {
+                if (error && error.status === 404) {
+                    remoteRecord = null;
+                } else {
+                    throw error;
+                }
+            }
+        }
+
+        if (!updatedRecord) {
+            const createdRecord = await createGoogleDriveCanonicalItemRecord(docToWrite);
+            if (createdRecord && createdRecord.id != null) {
+                updatedRecord = await updateGoogleDriveCanonicalItemRecord(createdRecord.id, docToWrite);
+            } else {
+                updatedRecord = createdRecord;
+            }
+        }
+
+        if (!updatedRecord || updatedRecord.id == null) {
+            throw new Error('Google Drive file could not be created or updated.');
+        }
+
+        updateGoogleDriveItemReference(updatedRecord);
+
+        missionCanonicalDocument = {
+            ...docToWrite,
+            missions: docToWrite.missions.map(cloneMissionRecord),
+            missionSyncMetaById: cloneMissionSyncMetaMap(docToWrite.missionSyncMetaById)
+        };
+        missions = missionCanonicalDocument.missions.map(cloneMissionRecord);
+        missionSyncMetaById = cloneMissionSyncMetaMap(missionCanonicalDocument.missionSyncMetaById);
+        storeMissionCanonicalDocumentLocally(missionCanonicalDocument);
+        missionCanonicalLocalDirty = false;
+        updateGoogleDriveStatusFromState();
+        return true;
+    } catch (error) {
+        console.warn('Failed to write mission data to Google Drive.', error);
+        setGoogleDriveStatus(graphErrorMessage(error, 'Google Drive write failed.'), 'error');
+        return false;
+    } finally {
+        googleDriveWriteInFlight = false;
+    }
+}
+
+function queueGoogleDriveFileWrite(document = null) {
+    googleDriveWriteQueue = googleDriveWriteQueue
+        .then(() => writeGoogleDriveCanonicalDocument(document))
+        .catch(error => {
+            console.warn('Google Drive write queue failed.', error);
+        });
+
+    return googleDriveWriteQueue;
+}
+
+async function syncMissionCanonicalDocumentFromGoogleDriveFile(options = {}) {
+    const { force = false, initializeIfEmpty = false, interactive = false, skipAccessTokenCheck = false } = options;
+    if (googleDriveReloadInProgress) return null;
+    if (!hasGoogleDriveSyncConfiguration()) {
+        updateGoogleDriveStatusFromState();
+        return null;
+    }
+
+    if (!supportsGoogleDriveSyncTransport()) {
+        setGoogleDriveStatus('Google Drive sync requires a secure browser context.', 'error');
+        return null;
+    }
+
+    if (!skipAccessTokenCheck) {
+        const accessToken = await getGoogleDriveAccessToken({ interactive });
+        if (!accessToken) {
+            updateGoogleDriveStatusFromState();
+            return null;
+        }
+    }
+
+    if (!force && (googleDriveWriteInFlight || missionCanonicalLocalDirty || editingMissionId != null)) {
+        return null;
+    }
+
+    googleDriveReloadInProgress = true;
+    try {
+        const remoteRecord = await findGoogleDriveCanonicalItemRecord({ interactive });
+        const remoteWasEmpty = Boolean(remoteRecord && Number(remoteRecord.size) === 0);
+        const localDocument = missionCanonicalDocument || loadMissionCanonicalDocumentFromCache() || buildMissionCanonicalDocument();
+
+        if (!remoteRecord) {
+            if (initializeIfEmpty) {
+                const initialDocument = localDocument || buildMissionCanonicalDocument();
+                if (initialDocument) {
+                    const initialized = await queueGoogleDriveFileWrite(initialDocument);
+                    if (initialized) {
+                        applyMissionCanonicalDocumentToRuntime(initialDocument);
+                        updateGoogleDriveStatusFromState();
+                        return initialDocument;
+                    }
+                }
+            }
+            return null;
+        }
+
+        updateGoogleDriveItemReference(remoteRecord);
+        const remoteDocument = await parseGoogleDriveCanonicalDocumentFromRecord(remoteRecord);
+        const mergedDocument = localDocument
+            ? mergeMissionCanonicalDocuments(localDocument, remoteDocument)
+            : remoteDocument;
+
+        applyMissionCanonicalDocumentToRuntime(mergedDocument);
+        renderTimeline();
+        renderMissionCards();
+        if (activeTooltipMissionId != null) {
+            refreshTooltipForMission(activeTooltipMissionId);
+        }
+
+        if (remoteWasEmpty || (localDocument && getComparableMissionCanonicalPayload(mergedDocument) !== getComparableMissionCanonicalPayload(remoteDocument))) {
+            void queueGoogleDriveFileWrite(mergedDocument);
+        }
+
+        updateGoogleDriveStatusFromState();
+        return mergedDocument;
+    } catch (error) {
+        console.warn('Failed to sync mission data from Google Drive.', error);
+        setGoogleDriveStatus(graphErrorMessage(error, 'Google Drive sync failed.'), 'error');
+        return null;
+    } finally {
+        googleDriveReloadInProgress = false;
+    }
+}
+
+async function requestGoogleDriveConnection() {
+    if (!isGoogleDriveSyncMode()) {
+        setGoogleDriveStatus('Switch to Google Drive sync first.');
+        return null;
+    }
+
+    if (!hasGoogleDriveSyncConfiguration()) {
+        setGoogleDriveStatus('Google Drive config is incomplete.', 'error');
+        return null;
+    }
+
+    try {
+        setGoogleDriveStatus('Connecting to Google Drive...');
+        await getGoogleDriveAccessToken({ interactive: true });
+        const synced = await syncMissionCanonicalDocumentFromGoogleDriveFile({
+            force: true,
+            initializeIfEmpty: true,
+            interactive: true,
+            skipAccessTokenCheck: true
+        });
+        updateGoogleDriveStatusFromState();
+        startMissionCanonicalSyncLoop();
+        return synced;
+    } catch (error) {
+        console.warn('Google Drive connection failed.', error);
+        setGoogleDriveStatus(graphErrorMessage(error, 'Google Drive connection failed.'), 'error');
+        return null;
+    }
+}
+
+async function syncGoogleDriveNow() {
+    if (!isGoogleDriveSyncMode()) return null;
+    if (!hasGoogleDriveSyncConfiguration()) {
+        setGoogleDriveStatus('Google Drive config is incomplete.', 'error');
+        return null;
+    }
+
+    try {
+        const accessToken = await getGoogleDriveAccessToken({ interactive: false });
+        if (!accessToken) {
+            updateGoogleDriveStatusFromState();
+            return null;
+        }
+        const synced = await syncMissionCanonicalDocumentFromGoogleDriveFile({
+            force: true,
+            initializeIfEmpty: true,
+            skipAccessTokenCheck: true
+        });
+        updateGoogleDriveStatusFromState();
+        startMissionCanonicalSyncLoop();
+        return synced;
+    } catch (error) {
+        console.warn('Google Drive sync failed.', error);
+        setGoogleDriveStatus(graphErrorMessage(error, 'Google Drive sync failed.'), 'error');
         return null;
     }
 }
@@ -4762,11 +5552,21 @@ missionDefaultsForm.addEventListener('input', event => {
         missionSharePointClientIdInput,
         missionSharePointRedirectUriInput
     ];
+    const googleDriveConfigInputs = [
+        missionGoogleDriveClientIdInput,
+        missionGoogleDriveFileNameInput,
+        missionGoogleDriveFolderIdInput
+    ];
+    const googleDriveAuthInputs = [
+        missionGoogleDriveClientIdInput
+    ];
     const wasBackendChange = event.target === missionSyncBackendInput;
     const wasOneDriveConfigChange = oneDriveConfigInputs.includes(event.target);
     const wasOneDriveAuthChange = oneDriveAuthInputs.includes(event.target);
     const wasSharePointConfigChange = sharePointConfigInputs.includes(event.target);
     const wasSharePointAuthChange = sharePointAuthInputs.includes(event.target);
+    const wasGoogleDriveConfigChange = googleDriveConfigInputs.includes(event.target);
+    const wasGoogleDriveAuthChange = googleDriveAuthInputs.includes(event.target);
 
     missionDefaults = readMissionDefaultsForm();
 
@@ -4782,6 +5582,13 @@ missionDefaultsForm.addEventListener('input', event => {
             resetSharePointAuthClient();
         }
         clearSharePointItemReference();
+    }
+
+    if (wasGoogleDriveConfigChange && event.target !== missionGoogleDriveFileIdInput) {
+        if (wasGoogleDriveAuthChange) {
+            resetGoogleDriveAuthClient();
+        }
+        clearGoogleDriveItemReference();
     }
 
     persistMissionDefaults();
@@ -4803,6 +5610,11 @@ missionDefaultsForm.addEventListener('input', event => {
         if (isSharePointSyncMode() && hasSharePointSyncConfiguration()) {
             startMissionCanonicalSyncLoop();
         }
+    } else if (wasGoogleDriveConfigChange) {
+        updateGoogleDriveStatusFromState();
+        if (isGoogleDriveSyncMode() && hasGoogleDriveSyncConfiguration()) {
+            startMissionCanonicalSyncLoop();
+        }
     }
 });
 
@@ -4815,6 +5627,8 @@ document.getElementById('btn-clear-defaults').addEventListener('click', () => {
     clearOneDriveItemReference();
     resetSharePointAuthClient();
     clearSharePointItemReference();
+    resetGoogleDriveAuthClient();
+    clearGoogleDriveItemReference();
     void clearStoredMissionDataHandle();
 });
 
@@ -4836,6 +5650,14 @@ oneDriveConnectButton?.addEventListener('click', () => {
 
 oneDriveSyncNowButton?.addEventListener('click', () => {
     void syncOneDriveNow();
+});
+
+googleDriveConnectButton?.addEventListener('click', () => {
+    void requestGoogleDriveConnection();
+});
+
+googleDriveSyncNowButton?.addEventListener('click', () => {
+    void syncGoogleDriveNow();
 });
 
 function toDateTimeLocal(date) {
