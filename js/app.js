@@ -71,7 +71,8 @@ const SHAREPOINT_GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
 const GOOGLE_CLOUD_API_BASE_URL = 'https://www.googleapis.com/drive/v3';
 const GOOGLE_CLOUD_UPLOAD_BASE_URL = 'https://www.googleapis.com/upload/drive/v3';
 const GOOGLE_CLOUD_CANONICAL_FILE_MIME_TYPE = 'application/json';
-const MISSION_ENTRY_ANIMATION_DURATION_MS = 500;
+const MISSION_ENTRY_ANIMATION_DURATION_MS = 1500;
+const MISSION_CARD_PAST_ORDER_OFFSET = 1e15;
 let missionDefaults = createEmptyMissionDefaults();
 const tabButtons = document.querySelectorAll('.app-tab');
 let airportData = {};
@@ -4250,6 +4251,7 @@ function syncCurrentTimeIndicator() {
     const existingIndicator = gridContainer.querySelector('.current-time-line');
     const now = new Date();
     const nowTime = now.getTime();
+    syncMissionCardTemporalState(nowTime);
     const duration = viewEnd - viewStart;
     const strip = ensureCurrentTimeBubbleStrip();
 
@@ -5612,6 +5614,56 @@ function getMissionTimes(mission) {
     return { start, end };
 }
 
+function getMissionCardStartTime(mission) {
+    const start = getMissionTimes(mission).start;
+    return start > 0 ? start : Number.POSITIVE_INFINITY;
+}
+
+function isMissionCardPast(mission, nowTime = Date.now()) {
+    const start = getMissionCardStartTime(mission);
+    return !Number.isFinite(start) || start < nowTime;
+}
+
+function getMissionCardOrderValue(mission, nowTime = Date.now()) {
+    const start = getMissionCardStartTime(mission);
+    if (!Number.isFinite(start)) return Number.MAX_SAFE_INTEGER;
+    return start + (start < nowTime ? MISSION_CARD_PAST_ORDER_OFFSET : 0);
+}
+
+function compareMissionCardsByTakeoffTime(left, right, nowTime = Date.now()) {
+    const leftStart = getMissionCardStartTime(left);
+    const rightStart = getMissionCardStartTime(right);
+    const leftPast = !Number.isFinite(leftStart) || leftStart < nowTime;
+    const rightPast = !Number.isFinite(rightStart) || rightStart < nowTime;
+
+    if (leftPast !== rightPast) return leftPast ? 1 : -1;
+    if (leftStart !== rightStart) return leftStart - rightStart;
+
+    return (left.missionNum || '').localeCompare(right.missionNum || '')
+        || String(left.id || '').localeCompare(String(right.id || ''));
+}
+
+function applyMissionCardTemporalState(card, mission, nowTime = Date.now()) {
+    if (!card || !mission) return;
+
+    const isPast = isMissionCardPast(mission, nowTime);
+    card.classList.toggle('past-mission', isPast);
+    card.dataset.missionPast = isPast ? '1' : '0';
+    card.style.order = String(getMissionCardOrderValue(mission, nowTime));
+}
+
+function syncMissionCardTemporalState(nowTime = Date.now()) {
+    const list = document.getElementById('mission-list');
+    if (!list || list.children.length === 0) return;
+
+    const missionById = new Map(missions.map(mission => [String(mission.id), mission]));
+    list.querySelectorAll('.mission-card').forEach(card => {
+        const mission = missionById.get(card.dataset.missionId || String(card.id || '').replace(/^card-/, ''));
+        if (!mission) return;
+        applyMissionCardTemporalState(card, mission, nowTime);
+    });
+}
+
 function zoomToMonth(dateObj) {
     const start = new Date(dateObj.getFullYear(), dateObj.getMonth(), 1);
     const end = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0, 23, 59, 59);
@@ -5803,7 +5855,7 @@ function renderTimeline() {
 
     // --- TAIL ROW ASSIGNMENT ---
     const uniqueTails = [...new Set(missions.map(m => m.tailNum ? m.tailNum.toUpperCase() : 'TBD'))].sort();
-    const rowHeight = 46;
+    const rowHeight = 92;
     const rowOffset = 24; // Start tail rows below the day-label divider.
 
     // Dynamically adjust viewport height to fit all tails
@@ -5823,7 +5875,7 @@ function renderTimeline() {
         // Fixed Tail Label in Sidebar (matches vertical offset perfectly)
         const label = document.createElement('div');
         label.className = 'tail-label';
-        label.style.top = `${topPx + 8}px`; 
+        label.style.top = `${topPx + 16}px`;
         label.textContent = tail;
         labelsContainer.appendChild(label);
     });
@@ -5857,11 +5909,11 @@ function renderTimeline() {
         // Assign top position based on matching tail row
         const tailStr = mission.tailNum ? mission.tailNum.toUpperCase() : 'TBD';
         const tailIndex = uniqueTails.indexOf(tailStr);
-        bar.style.top = `${rowOffset + (tailIndex * rowHeight) + 8}px`; 
+        bar.style.top = `${rowOffset + (tailIndex * rowHeight) + 16}px`;
         
         const firstIcao = escapeHtml(mission.legs[0].takeoffIcao);
         const lastIcao = escapeHtml(mission.legs[mission.legs.length - 1].landIcao);
-        bar.innerHTML = `<span>${escapeHtml(mission.missionNum)} (${firstIcao}&rarr;${lastIcao})</span>`;
+        bar.innerHTML = `<span class="timeline-bar-mission">${escapeHtml(mission.missionNum)}</span><span class="timeline-bar-route">(${firstIcao}&rarr;${lastIcao})</span>`;
 
         bar.addEventListener('mouseenter', (e) => {
             showMissionTooltip(mission, e);
@@ -5899,12 +5951,15 @@ function renderMissionCards() {
     const list = document.getElementById('mission-list');
     clearMissionCardFocusHighlight();
     list.innerHTML = '';
-    const sorted = [...missions].sort((a, b) => getMissionTimes(b).start - getMissionTimes(a).start);
+    const nowTime = Date.now();
+    const sorted = [...missions].sort((a, b) => compareMissionCardsByTakeoffTime(a, b, nowTime));
 
     sorted.forEach(mission => {
         const card = document.createElement('div');
         card.className = 'mission-card';
         card.id = `card-${mission.id}`;
+        card.dataset.missionId = String(mission.id);
+        applyMissionCardTemporalState(card, mission, nowTime);
 
         const hasAnyCrew = !!(mission.pilot || mission.copilot || mission.crewChief || mission.loadmaster);
         const isComplete = !!(mission.missionNum && mission.tailNum && mission.legs.length > 0 && 
