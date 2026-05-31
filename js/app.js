@@ -71,6 +71,7 @@ const SHAREPOINT_GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
 const GOOGLE_CLOUD_API_BASE_URL = 'https://www.googleapis.com/drive/v3';
 const GOOGLE_CLOUD_UPLOAD_BASE_URL = 'https://www.googleapis.com/upload/drive/v3';
 const GOOGLE_CLOUD_CANONICAL_FILE_MIME_TYPE = 'application/json';
+const MISSION_ENTRY_ANIMATION_DURATION_MS = 500;
 let missionDefaults = createEmptyMissionDefaults();
 const tabButtons = document.querySelectorAll('.app-tab');
 let airportData = {};
@@ -5820,6 +5821,7 @@ function renderTimeline() {
 
         const bar = document.createElement('div');
         bar.className = 'timeline-bar';
+        bar.id = `timeline-${mission.id}`;
         
         // Highlight missing crew or past missions
         const isCompleteCrew = mission.pilot && mission.copilot && mission.crewChief && mission.loadmaster;
@@ -5944,6 +5946,60 @@ function renderMissionCards() {
     });
 }
 
+function animateMissionEntryElement(element, animationClass) {
+    if (!element) return;
+
+    element.classList.add(animationClass);
+    window.setTimeout(() => {
+        if (element.isConnected) {
+            element.classList.remove(animationClass);
+        }
+    }, MISSION_ENTRY_ANIMATION_DURATION_MS);
+}
+
+function animateAddedMission(id) {
+    window.requestAnimationFrame(() => {
+        animateMissionEntryElement(document.getElementById(`card-${id}`), 'mission-card-entry-animating');
+        animateMissionEntryElement(document.getElementById(`timeline-${id}`), 'mission-timeline-entry-animating');
+    });
+}
+
+function createMissionRemovalGhost(element, host, positionStrategy, animationClass = 'mission-card-delete-animating') {
+    if (!element || !host) return;
+
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    const ghost = element.cloneNode(true);
+    ghost.removeAttribute('id');
+    ghost.classList.add(animationClass);
+    ghost.style.margin = '0';
+    ghost.style.pointerEvents = 'none';
+    ghost.style.zIndex = '9999';
+    ghost.style.transformOrigin = 'center center';
+    ghost.style.width = `${rect.width}px`;
+    ghost.style.height = `${rect.height}px`;
+
+    if (positionStrategy === 'absolute') {
+        const hostRect = host.getBoundingClientRect();
+        ghost.style.position = 'absolute';
+        ghost.style.left = `${rect.left - hostRect.left}px`;
+        ghost.style.top = `${rect.top - hostRect.top}px`;
+    } else {
+        ghost.style.position = 'fixed';
+        ghost.style.left = `${rect.left}px`;
+        ghost.style.top = `${rect.top}px`;
+    }
+
+    host.appendChild(ghost);
+    window.setTimeout(() => ghost.remove(), MISSION_ENTRY_ANIMATION_DURATION_MS + 40);
+}
+
+function animateDeletedMission(id) {
+    createMissionRemovalGhost(document.getElementById(`card-${id}`), document.body, 'fixed', 'mission-card-delete-animating');
+    createMissionRemovalGhost(document.getElementById(`timeline-${id}`), viewport, 'absolute', 'mission-timeline-delete-animating');
+}
+
 function locateMission(id, event) {
     event.stopPropagation();
     const mission = missions.find(m => m.id === id);
@@ -5989,6 +6045,7 @@ function focusMissionCard(id) {
 function deleteMission(id, event) {
     event.stopPropagation();
     if(confirm("Are you sure you want to delete this mission?")) {
+        animateDeletedMission(id);
         markMissionDeleted(id);
         missions = missions.filter(m => m.id !== id);
         persistMissions();
@@ -6009,6 +6066,7 @@ document.getElementById('csv-file-input').addEventListener('change', function(e)
         
         const headers = parseCsvLine(lines[0]).map(h => h.trim().toLowerCase());
         const missionMap = new Map();
+        const importedMissionIds = [];
 
         for(let i=1; i<lines.length; i++) {
             const cols = parseCsvLine(lines[i]).map(c => c.trim());
@@ -6051,6 +6109,7 @@ document.getElementById('csv-file-input').addEventListener('change', function(e)
                 if (normalizedMission) {
                     missions.push(normalizedMission);
                     markMissionUpdated(normalizedMission.id);
+                    importedMissionIds.push(normalizedMission.id);
                 }
             }
         });
@@ -6058,7 +6117,8 @@ document.getElementById('csv-file-input').addEventListener('change', function(e)
         persistMissions();
         renderTimeline();
         renderMissionCards();
-        alert("CSV Imported Successfully!");
+        importedMissionIds.forEach(id => animateAddedMission(id));
+        window.setTimeout(() => alert("CSV Imported Successfully!"), MISSION_ENTRY_ANIMATION_DURATION_MS + 50);
         e.target.value = ''; 
     };
     reader.readAsText(file);
@@ -6490,6 +6550,7 @@ missionForm.addEventListener('submit', async function(e) {
 
     const editId = document.getElementById('editMissionId').value;
     const committedMissionId = editId || null;
+    let newlyCreatedMissionId = null;
     if (editId) {
         const index = missions.findIndex(m => m.id == editId);
         if (index > -1) {
@@ -6504,6 +6565,7 @@ missionForm.addEventListener('submit', async function(e) {
         if (normalizedMission) {
             missions.push(normalizedMission);
             markMissionUpdated(normalizedMission.id);
+            newlyCreatedMissionId = normalizedMission.id;
         }
     }
 
@@ -6512,6 +6574,9 @@ missionForm.addEventListener('submit', async function(e) {
     modal.style.display = "none";
     renderTimeline();
     renderMissionCards();
+    if (newlyCreatedMissionId) {
+        animateAddedMission(newlyCreatedMissionId);
+    }
     if (committedMissionId != null) {
         refreshTooltipForMission(committedMissionId);
     }

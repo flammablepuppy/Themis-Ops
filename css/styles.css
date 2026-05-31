@@ -383,6 +383,94 @@
     .mission-card.highlight,
     .mission-card.focus-highlight { border-left-color: var(--highlight); background-color: var(--highlight-bg); box-shadow: 0 4px 12px rgba(255, 193, 7, 0.3); }
 
+    .mission-card-entry-animating {
+        animation: backInLeft 0.5s ease-out both;
+        transform-origin: center center;
+        will-change: transform, opacity;
+    }
+
+    .mission-timeline-entry-animating {
+        animation: zoomIn 0.5s ease-out both;
+        transform-origin: center center;
+        will-change: transform, opacity;
+    }
+
+    @keyframes backInLeft {
+        0% {
+            opacity: 0;
+            transform: translateX(-2000px) scale(0.7);
+        }
+        80% {
+            opacity: 1;
+            transform: translateX(0) scale(0.7);
+        }
+        100% {
+            opacity: 1;
+            transform: scale(1);
+        }
+    }
+
+    @keyframes zoomIn {
+        0% {
+            opacity: 0;
+            transform: scale3d(0.3, 0.3, 0.3);
+        }
+        50% {
+            opacity: 1;
+        }
+        100% {
+            opacity: 1;
+            transform: scale3d(1, 1, 1);
+        }
+    }
+
+    .mission-card-delete-animating {
+        animation: backOutRight 0.5s ease-in both;
+        transform-origin: center center;
+        will-change: transform, opacity;
+    }
+
+    .mission-timeline-delete-animating {
+        animation: zoomOut 0.5s ease-in both;
+        transform-origin: center center;
+        will-change: transform, opacity;
+    }
+
+    @keyframes backOutRight {
+        0% {
+            opacity: 1;
+            transform: scale(1) translateX(0);
+        }
+        20% {
+            opacity: 0.7;
+            transform: scale(0.7) translateX(0);
+        }
+        100% {
+            opacity: 0;
+            transform: scale(0.7) translateX(2000px);
+        }
+    }
+
+    @keyframes zoomOut {
+        0% {
+            opacity: 1;
+            transform: scale3d(1, 1, 1);
+        }
+        100% {
+            opacity: 0;
+            transform: scale3d(0.3, 0.3, 0.3);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .mission-card-entry-animating,
+        .mission-timeline-entry-animating,
+        .mission-card-delete-animating,
+        .mission-timeline-delete-animating {
+            animation: none !important;
+        }
+    }
+
     .card-col { flex: 1; border-right: 1px dashed var(--border-color); padding-right: 12px; }
     .card-col:last-child { border-right: none; padding-right: 0; }
     
