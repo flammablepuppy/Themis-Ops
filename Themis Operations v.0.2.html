@@ -44,7 +44,7 @@
                 </div>
             </div>
 
-            <p class="timeline-tip">
+            <p class="timeline-tip" id="timeline-tip">
                 <em>Tip: Scroll to zoom. Drag to pan. Hover over missions to locate details.</em>
             </p>
         </div>
@@ -62,7 +62,7 @@
     <section id="defaults-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-defaults" hidden>
         <div class="card">
             <div class="card-header">
-                <h2>Mission Defaults</h2>
+                <h2>Mission Defaults Configuration</h2>
                 <button type="button" class="btn btn-small" id="btn-clear-defaults">Reset</button>
             </div>
 
@@ -72,11 +72,37 @@
                 </div>
                 <div class="form-row">
                     <div class="form-col">
+                        <label>Sync Backend</label>
+                        <select id="defaultSyncBackend">
+                            <option value="local-file">Local File</option>
+                            <option value="sharepoint-list">SharePoint List</option>
+                            <option value="onedrive-file">OneDrive File</option>
+                        </select>
+                    </div>
+                    <div class="form-col" id="sharepoint-sync-status-panel" hidden>
+                        <label>SharePoint Status</label>
+                        <div class="sync-status-row">
+                            <span id="sharepoint-sync-status" class="sync-status-text">Disconnected</span>
+                            <button type="button" class="btn btn-small" id="btn-sharepoint-connect">Connect</button>
+                            <button type="button" class="btn btn-small" id="btn-sharepoint-sync-now">Sync Now</button>
+                        </div>
+                    </div>
+                    <div class="form-col" id="onedrive-sync-status-panel" hidden>
+                        <label>OneDrive Status</label>
+                        <div class="sync-status-row">
+                            <span id="onedrive-sync-status" class="sync-status-text">Disconnected</span>
+                            <button type="button" class="btn btn-small" id="btn-onedrive-connect">Connect</button>
+                            <button type="button" class="btn btn-small" id="btn-onedrive-sync-now">Sync Now</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-col">
                         <label>Available Tail Numbers</label>
                         <textarea id="defaultTailNumbers" rows="3" placeholder="695, 834, 877"></textarea>
                     </div>
                 </div>
-                <div class="form-row">
+                <div class="form-row sync-settings-group" id="local-sync-settings" hidden>
                     <div class="form-col">
                         <label>Mission Data Path</label>
                         <div class="mission-path-picker">
@@ -84,6 +110,37 @@
                             <button type="button" class="btn btn-small" id="btn-choose-mission-data-file">Choose</button>
                         </div>
                     </div>
+                </div>
+                <div class="sync-settings-group" id="sharepoint-sync-settings" hidden>
+                    <div class="form-row">
+                        <div class="form-col"><label>Tenant ID</label><input type="text" id="defaultSharePointTenantId" placeholder="contoso.onmicrosoft.com"></div>
+                        <div class="form-col"><label>Client ID</label><input type="text" id="defaultSharePointClientId" placeholder="Azure app registration client ID"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-col"><label>Site ID</label><input type="text" id="defaultSharePointSiteId" placeholder="contoso.sharepoint.com,site-id,web-id"></div>
+                        <div class="form-col"><label>List ID or Name</label><input type="text" id="defaultSharePointListIdentifier" placeholder="Missions"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-col"><label>Item Title</label><input type="text" id="defaultSharePointItemTitle" placeholder="Themis Operations"></div>
+                        <div class="form-col"><label>Payload Field</label><input type="text" id="defaultSharePointPayloadField" placeholder="Payload"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-col"><label>Redirect URI</label><input type="text" id="defaultSharePointRedirectUri" placeholder="https://example.com/themis-ops.html"></div>
+                    </div>
+                    <input type="hidden" id="defaultSharePointItemId">
+                    <input type="hidden" id="defaultSharePointItemETag">
+                </div>
+                <div class="sync-settings-group" id="onedrive-sync-settings" hidden>
+                    <div class="form-row">
+                        <div class="form-col"><label>Tenant ID</label><input type="text" id="defaultOneDriveTenantId" placeholder="contoso.onmicrosoft.com"></div>
+                        <div class="form-col"><label>Client ID</label><input type="text" id="defaultOneDriveClientId" placeholder="Azure app registration client ID"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-col"><label>File Path</label><input type="text" id="defaultOneDriveFilePath" placeholder="themis_operations_missions.json"></div>
+                        <div class="form-col"><label>Redirect URI</label><input type="text" id="defaultOneDriveRedirectUri" placeholder="https://example.com/themis-ops.html"></div>
+                    </div>
+                    <input type="hidden" id="defaultOneDriveItemId">
+                    <input type="hidden" id="defaultOneDriveItemETag">
                 </div>
                 <button type="submit" class="btn submit-btn">Save Defaults</button>
             </form>
@@ -137,6 +194,7 @@
     </div>
 </div>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js"></script>
     <script src="js/app.js"></script>
 
 </body>

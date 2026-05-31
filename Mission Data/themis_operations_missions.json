@@ -1,56 +1,103 @@
-[
-  {
-    "id": 1780097691201,
-    "missionNum": "CNV42069",
-    "tailNum": "695",
-    "pilot": "",
-    "copilot": "",
-    "crewChief": "",
-    "loadmaster": "",
-    "liftPax": "30",
-    "liftCargo": "2000",
-    "liftHazmat": "Yes",
-    "legs": [
-      {
-        "takeoffIcao": "KNUW",
-        "takeoffTime": "2026-05-30T16:00:00.000Z",
-        "landIcao": "KSLC",
-        "landTime": "2026-05-30T19:30:00.000Z"
-      },
-      {
-        "takeoffIcao": "KSLC",
-        "takeoffTime": "2026-05-30T20:30:00.000Z",
-        "landIcao": "KNZY",
-        "landTime": "2026-05-30T23:30:00.000Z"
-      },
-      {
-        "takeoffIcao": "KNZY",
-        "takeoffTime": "2026-06-01T16:00:00.000Z",
-        "landIcao": "KNUW",
-        "landTime": "2026-06-01T19:30:00.000Z"
-      }
-    ],
-    "liftCustomer": ""
-  },
-  {
-    "id": 1780097691204,
-    "missionNum": "CNV4444",
-    "tailNum": "834",
-    "pilot": "",
-    "copilot": "",
-    "crewChief": "",
-    "loadmaster": "",
-    "liftPax": "",
-    "liftCargo": "",
-    "liftHazmat": "",
-    "legs": [
-      {
-        "takeoffIcao": "KNUW",
-        "takeoffTime": "2026-06-01T16:00:00.000Z",
-        "landIcao": "KPNS",
-        "landTime": "2026-06-01T19:30:00.000Z"
-      }
-    ],
-    "liftCustomer": ""
+{
+  "schemaVersion": 1,
+  "revision": 3,
+  "updatedAt": "2026-05-30T20:43:20.247Z",
+  "updatedBy": "ops-82a53235-683a-4293-9c13-c267ba5dfb10",
+  "missions": [
+    {
+      "id": "1780152833309",
+      "missionNum": "CNV42069",
+      "tailNum": "166695",
+      "pilot": "",
+      "copilot": "",
+      "crewChief": "",
+      "loadmaster": "",
+      "liftCustomer": "",
+      "liftPax": "30",
+      "liftCargo": "2000",
+      "liftHazmat": "Yes",
+      "legs": [
+        {
+          "takeoffIcao": "KNUW",
+          "takeoffTime": "2026-05-30T16:00:00.000Z",
+          "landIcao": "KSLC",
+          "landTime": "2026-05-30T19:30:00.000Z"
+        },
+        {
+          "takeoffIcao": "KSLC",
+          "takeoffTime": "2026-05-30T20:30:00.000Z",
+          "landIcao": "KNZY",
+          "landTime": "2026-05-30T23:30:00.000Z"
+        },
+        {
+          "takeoffIcao": "KNZY",
+          "takeoffTime": "2026-06-01T16:00:00.000Z",
+          "landIcao": "KNUW",
+          "landTime": "2026-06-01T19:30:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "1780152833312",
+      "missionNum": "CNV4444",
+      "tailNum": "165834",
+      "pilot": "",
+      "copilot": "",
+      "crewChief": "",
+      "loadmaster": "",
+      "liftCustomer": "",
+      "liftPax": "",
+      "liftCargo": "",
+      "liftHazmat": "",
+      "legs": [
+        {
+          "takeoffIcao": "KNUW",
+          "takeoffTime": "2026-06-01T16:00:00.000Z",
+          "landIcao": "KPNS",
+          "landTime": "2026-06-01T19:30:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "mission-993b5887-6c8a-44e0-a40c-9c5bf2cddcd0",
+      "missionNum": "DELETE THIS MISSION IF YOU CAN SEE IT.",
+      "tailNum": "Glenn Check",
+      "pilot": "",
+      "copilot": "",
+      "crewChief": "",
+      "loadmaster": "",
+      "liftCustomer": "",
+      "liftPax": "",
+      "liftCargo": "",
+      "liftHazmat": "",
+      "legs": [
+        {
+          "takeoffIcao": "KNUW",
+          "takeoffTime": "2026-05-31T16:00:00.000Z",
+          "landIcao": "KNUW",
+          "landTime": "2026-05-31T19:30:00.000Z"
+        }
+      ]
+    }
+  ],
+  "missionSyncMetaById": {
+    "1780152833309": {
+      "updatedAt": "2026-05-30T20:42:20.753Z",
+      "updatedBy": "ops-82a53235-683a-4293-9c13-c267ba5dfb10",
+      "deletedAt": "",
+      "deletedBy": ""
+    },
+    "1780152833312": {
+      "updatedAt": "2026-05-30T20:42:20.753Z",
+      "updatedBy": "ops-82a53235-683a-4293-9c13-c267ba5dfb10",
+      "deletedAt": "",
+      "deletedBy": ""
+    },
+    "mission-993b5887-6c8a-44e0-a40c-9c5bf2cddcd0": {
+      "updatedAt": "2026-05-30T20:43:20.240Z",
+      "updatedBy": "ops-82a53235-683a-4293-9c13-c267ba5dfb10",
+      "deletedAt": "",
+      "deletedBy": ""
+    }
   }
-]
+}

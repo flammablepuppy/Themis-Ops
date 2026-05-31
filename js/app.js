@@ -18,15 +18,52 @@ const missionDefaultsForm = document.getElementById('mission-defaults-form');
 const missionHomeFieldInput = document.getElementById('defaultHomeField');
 const missionTailNumbersInput = document.getElementById('defaultTailNumbers');
 const missionDataPathInput = document.getElementById('defaultMissionDataPath');
+const missionSyncBackendInput = document.getElementById('defaultSyncBackend');
+const missionSharePointTenantIdInput = document.getElementById('defaultSharePointTenantId');
+const missionSharePointClientIdInput = document.getElementById('defaultSharePointClientId');
+const missionSharePointSiteIdInput = document.getElementById('defaultSharePointSiteId');
+const missionSharePointListIdentifierInput = document.getElementById('defaultSharePointListIdentifier');
+const missionSharePointItemTitleInput = document.getElementById('defaultSharePointItemTitle');
+const missionSharePointPayloadFieldInput = document.getElementById('defaultSharePointPayloadField');
+const missionSharePointRedirectUriInput = document.getElementById('defaultSharePointRedirectUri');
+const missionSharePointItemIdInput = document.getElementById('defaultSharePointItemId');
+const missionSharePointItemETagInput = document.getElementById('defaultSharePointItemETag');
+const missionSharePointStatusInput = document.getElementById('sharepoint-sync-status');
+const sharePointStatusPanel = document.getElementById('sharepoint-sync-status-panel');
+const missionOneDriveTenantIdInput = document.getElementById('defaultOneDriveTenantId');
+const missionOneDriveClientIdInput = document.getElementById('defaultOneDriveClientId');
+const missionOneDriveFilePathInput = document.getElementById('defaultOneDriveFilePath');
+const missionOneDriveRedirectUriInput = document.getElementById('defaultOneDriveRedirectUri');
+const missionOneDriveItemIdInput = document.getElementById('defaultOneDriveItemId');
+const missionOneDriveItemETagInput = document.getElementById('defaultOneDriveItemETag');
+const missionOneDriveStatusInput = document.getElementById('onedrive-sync-status');
+const oneDriveStatusPanel = document.getElementById('onedrive-sync-status-panel');
+const localSyncSettingsContainer = document.getElementById('local-sync-settings');
+const sharePointSyncSettingsContainer = document.getElementById('sharepoint-sync-settings');
+const oneDriveSyncSettingsContainer = document.getElementById('onedrive-sync-settings');
+const sharePointConnectButton = document.getElementById('btn-sharepoint-connect');
+const sharePointSyncNowButton = document.getElementById('btn-sharepoint-sync-now');
+const oneDriveConnectButton = document.getElementById('btn-onedrive-connect');
+const oneDriveSyncNowButton = document.getElementById('btn-onedrive-sync-now');
 const DEFAULTS_STORAGE_KEY = 'themis-ops-mission-defaults';
 const MISSIONS_STORAGE_KEY = 'themis-ops-missions';
 const MISSION_DATA_HANDLE_DB_NAME = 'themis-ops-mission-data';
 const MISSION_DATA_HANDLE_STORE_NAME = 'handles';
 const MISSION_DATA_HANDLE_KEY = 'mission-data-handle';
+const MISSION_CANONICAL_SCHEMA_VERSION = 1;
+const MISSION_CANONICAL_CLIENT_ID_KEY = 'themis-ops-mission-client-id';
+const MISSION_CANONICAL_SYNC_POLL_MS = 2000;
+const MISSION_SHAREPOINT_SYNC_POLL_MS = 5000;
+const MISSION_ONEDRIVE_SYNC_POLL_MS = 5000;
+const SHAREPOINT_CANONICAL_ITEM_TITLE = 'Themis Operations';
+const SHAREPOINT_DEFAULT_PAYLOAD_FIELD = 'Payload';
+const SHAREPOINT_GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
 let missionDefaults = createEmptyMissionDefaults();
 const tabButtons = document.querySelectorAll('.app-tab');
 let airportData = {};
 let airportDataPromise = null;
+let airportLookupEntries = [];
+let airportExactLookupIndex = new Map();
 let hoverRouteMap = null;
 let hoverTooltipToken = 0;
 let hoverTooltipPosition = { x: 0, y: 0 };
@@ -43,16 +80,69 @@ let missionDataFileHandleLoadPromise = null;
 let missionDataFileWriteQueue = Promise.resolve();
 let missionDataFileHandleDisabled = false;
 let missionDataFileHandleLoadToken = 0;
+let missionCanonicalDocument = null;
+let missionSyncMetaById = Object.create(null);
+let missionCanonicalSyncTimer = null;
+let missionCanonicalWriteInFlight = false;
+let missionCanonicalReloadInProgress = false;
+let missionCanonicalLocalDirty = false;
+let missionCanonicalClientId = null;
+let missionCanonicalSyncObserversAttached = false;
+let missionCanonicalSyncIntervalMs = 0;
+let sharePointAuthClient = null;
+let sharePointAuthConfigSignature = '';
+let sharePointActiveAccount = null;
+let sharePointResolvedListId = '';
+let sharePointResolvedListSignature = '';
+let sharePointWriteQueue = Promise.resolve();
+let sharePointWriteInFlight = false;
+let sharePointReloadInProgress = false;
+let sharePointSyncTimer = null;
+let oneDriveAuthClient = null;
+let oneDriveAuthConfigSignature = '';
+let oneDriveActiveAccount = null;
+let oneDriveResolvedItemId = '';
+let oneDriveResolvedItemSignature = '';
+let oneDriveWriteQueue = Promise.resolve();
+let oneDriveWriteInFlight = false;
+let oneDriveReloadInProgress = false;
+let oneDriveSyncTimer = null;
 let currentTimeBubbleStrip = null;
 let currentTimeIndicatorRefreshTimer = null;
 let missionCardFocusTimeout = null;
 let focusedMissionCardId = null;
+let touchMoved = false;
+let touchTapMissionId = null;
+let touchPanStartX = 0;
+let touchPanStartViewStart = 0;
+let touchPanStartViewEnd = 0;
+let touchPinchStartDist = 0;
+let touchPinchStartMidPct = 0;
+let touchPinchStartViewStart = 0;
+let touchPinchStartViewEnd = 0;
+let touchActiveCount = 0;
 
 function createEmptyMissionDefaults() {
     return {
         homeField: '',
         missionDataPath: '',
-        availableTailNumbers: ''
+        availableTailNumbers: '',
+        syncBackend: 'local-file',
+        oneDriveTenantId: '',
+        oneDriveClientId: '',
+        oneDriveFilePath: 'themis_operations_missions.json',
+        oneDriveRedirectUri: '',
+        oneDriveItemId: '',
+        oneDriveItemETag: '',
+        sharePointTenantId: '',
+        sharePointClientId: '',
+        sharePointSiteId: '',
+        sharePointListIdentifier: '',
+        sharePointItemTitle: SHAREPOINT_CANONICAL_ITEM_TITLE,
+        sharePointPayloadField: SHAREPOINT_DEFAULT_PAYLOAD_FIELD,
+        sharePointRedirectUri: '',
+        sharePointItemId: '',
+        sharePointItemETag: ''
     };
 }
 
@@ -67,6 +157,12 @@ function normalizeTailNumbersField(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
 
+function normalizeMissionSyncBackend(value) {
+    return value === 'local-file' || value === 'sharepoint-list' || value === 'onedrive-file'
+        ? value
+        : 'local-file';
+}
+
 function loadMissionDefaults() {
     try {
         const raw = localStorage.getItem(DEFAULTS_STORAGE_KEY);
@@ -77,10 +173,64 @@ function loadMissionDefaults() {
         const missionDataPath = typeof parsed.missionDataPath === 'string' ? parsed.missionDataPath : '';
         const availableTailNumbers = normalizeTailNumbersField(parsed.availableTailNumbers ?? parsed.tailNumbers ?? '');
         const legacyHomeField = typeof parsed.tailNum === 'string' ? parsed.tailNum : '';
+        const syncBackend = normalizeMissionSyncBackend(parsed.syncBackend);
+        const legacyOneDriveTenantId = typeof parsed.sharePointTenantId === 'string' ? parsed.sharePointTenantId.trim() : '';
+        const legacyOneDriveClientId = typeof parsed.sharePointClientId === 'string' ? parsed.sharePointClientId.trim() : '';
+        const legacyOneDriveFilePath = '';
+        const legacyOneDriveRedirectUri = typeof parsed.sharePointRedirectUri === 'string' ? parsed.sharePointRedirectUri.trim() : '';
+        const legacyOneDriveItemId = '';
+        const legacyOneDriveItemETag = '';
+        const oneDriveTenantId = typeof parsed.oneDriveTenantId === 'string' && parsed.oneDriveTenantId.trim()
+            ? parsed.oneDriveTenantId.trim()
+            : legacyOneDriveTenantId;
+        const oneDriveClientId = typeof parsed.oneDriveClientId === 'string' && parsed.oneDriveClientId.trim()
+            ? parsed.oneDriveClientId.trim()
+            : legacyOneDriveClientId;
+        const oneDriveFilePath = typeof parsed.oneDriveFilePath === 'string' && parsed.oneDriveFilePath.trim()
+            ? parsed.oneDriveFilePath.trim()
+            : (legacyOneDriveFilePath || 'themis_operations_missions.json');
+        const oneDriveRedirectUri = typeof parsed.oneDriveRedirectUri === 'string' && parsed.oneDriveRedirectUri.trim()
+            ? parsed.oneDriveRedirectUri.trim()
+            : legacyOneDriveRedirectUri;
+        const oneDriveItemId = typeof parsed.oneDriveItemId === 'string' && parsed.oneDriveItemId.trim()
+            ? parsed.oneDriveItemId.trim()
+            : legacyOneDriveItemId;
+        const oneDriveItemETag = typeof parsed.oneDriveItemETag === 'string' && parsed.oneDriveItemETag.trim()
+            ? parsed.oneDriveItemETag.trim()
+            : legacyOneDriveItemETag;
+        const sharePointTenantId = typeof parsed.sharePointTenantId === 'string' ? parsed.sharePointTenantId.trim() : '';
+        const sharePointClientId = typeof parsed.sharePointClientId === 'string' ? parsed.sharePointClientId.trim() : '';
+        const sharePointSiteId = typeof parsed.sharePointSiteId === 'string' ? parsed.sharePointSiteId.trim() : '';
+        const sharePointListIdentifier = typeof parsed.sharePointListIdentifier === 'string' ? parsed.sharePointListIdentifier.trim() : '';
+        const sharePointItemTitle = typeof parsed.sharePointItemTitle === 'string' && parsed.sharePointItemTitle.trim()
+            ? parsed.sharePointItemTitle.trim()
+            : SHAREPOINT_CANONICAL_ITEM_TITLE;
+        const sharePointPayloadField = typeof parsed.sharePointPayloadField === 'string' && parsed.sharePointPayloadField.trim()
+            ? parsed.sharePointPayloadField.trim()
+            : SHAREPOINT_DEFAULT_PAYLOAD_FIELD;
+        const sharePointRedirectUri = typeof parsed.sharePointRedirectUri === 'string' ? parsed.sharePointRedirectUri.trim() : '';
+        const sharePointItemId = typeof parsed.sharePointItemId === 'string' ? parsed.sharePointItemId.trim() : '';
+        const sharePointItemETag = typeof parsed.sharePointItemETag === 'string' ? parsed.sharePointItemETag.trim() : '';
         return {
             homeField: (homeField || legacyHomeField).trim(),
             missionDataPath: missionDataPath.trim(),
-            availableTailNumbers
+            availableTailNumbers,
+            syncBackend,
+            oneDriveTenantId,
+            oneDriveClientId,
+            oneDriveFilePath,
+            oneDriveRedirectUri,
+            oneDriveItemId,
+            oneDriveItemETag,
+            sharePointTenantId,
+            sharePointClientId,
+            sharePointSiteId,
+            sharePointListIdentifier,
+            sharePointItemTitle,
+            sharePointPayloadField,
+            sharePointRedirectUri,
+            sharePointItemId,
+            sharePointItemETag
         };
     } catch {
         return createEmptyMissionDefaults();
@@ -95,18 +245,724 @@ function persistMissionDefaults() {
     }
 }
 
+function nowMissionTimestamp() {
+    return new Date().toISOString();
+}
+
+function getMissionSyncClientId() {
+    if (missionCanonicalClientId) return missionCanonicalClientId;
+
+    try {
+        const stored = localStorage.getItem(MISSION_CANONICAL_CLIENT_ID_KEY);
+        if (stored) {
+            missionCanonicalClientId = stored;
+            return missionCanonicalClientId;
+        }
+
+        const generated = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? `ops-${crypto.randomUUID()}`
+            : `ops-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+        localStorage.setItem(MISSION_CANONICAL_CLIENT_ID_KEY, generated);
+        missionCanonicalClientId = generated;
+        return missionCanonicalClientId;
+    } catch {
+        missionCanonicalClientId = `ops-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+        return missionCanonicalClientId;
+    }
+}
+
+function createMissionId(prefix = 'mission') {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return `${prefix}-${crypto.randomUUID()}`;
+    }
+
+    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createEmptyMissionSyncMeta() {
+    return {
+        updatedAt: '',
+        updatedBy: '',
+        deletedAt: '',
+        deletedBy: ''
+    };
+}
+
+function normalizeMissionSyncMeta(meta, fallback = {}) {
+    const source = meta && typeof meta === 'object' ? meta : {};
+    return {
+        updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : (fallback.updatedAt || ''),
+        updatedBy: typeof source.updatedBy === 'string' ? source.updatedBy : (fallback.updatedBy || ''),
+        deletedAt: typeof source.deletedAt === 'string' ? source.deletedAt : (fallback.deletedAt || ''),
+        deletedBy: typeof source.deletedBy === 'string' ? source.deletedBy : (fallback.deletedBy || '')
+    };
+}
+
+function cloneMissionSyncMetaMap(metaById) {
+    const cloned = Object.create(null);
+    if (!metaById || typeof metaById !== 'object') return cloned;
+
+    Object.keys(metaById).sort().forEach(id => {
+        cloned[String(id)] = normalizeMissionSyncMeta(metaById[id]);
+    });
+
+    return cloned;
+}
+
+function parseMissionTimestampMs(value) {
+    if (!value) return 0;
+    const timestamp = new Date(value).getTime();
+    return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function getMissionSyncMeta(id) {
+    const key = String(id);
+    return normalizeMissionSyncMeta(missionSyncMetaById[key]);
+}
+
+function setMissionSyncMeta(id, updates) {
+    const key = String(id);
+    const next = normalizeMissionSyncMeta(missionSyncMetaById[key]);
+    const source = updates && typeof updates === 'object' ? updates : {};
+    missionSyncMetaById[key] = normalizeMissionSyncMeta({
+        ...next,
+        ...source
+    });
+    return missionSyncMetaById[key];
+}
+
+function markMissionUpdated(id, timestamp = nowMissionTimestamp()) {
+    return setMissionSyncMeta(id, {
+        updatedAt: timestamp,
+        updatedBy: getMissionSyncClientId(),
+        deletedAt: '',
+        deletedBy: ''
+    });
+}
+
+function markMissionDeleted(id, timestamp = nowMissionTimestamp()) {
+    const current = getMissionSyncMeta(id);
+    return setMissionSyncMeta(id, {
+        updatedAt: current.updatedAt || timestamp,
+        updatedBy: current.updatedBy || getMissionSyncClientId(),
+        deletedAt: timestamp,
+        deletedBy: getMissionSyncClientId()
+    });
+}
+
+function normalizeMissionCanonicalDocument(raw, runtime = {}) {
+    const source = raw && typeof raw === 'object' ? raw : {};
+    const isLegacyArray = Array.isArray(raw);
+    const rawMissions = isLegacyArray
+        ? raw
+        : (Array.isArray(source.missions) ? source.missions : []);
+    const rawMeta = !isLegacyArray && source.missionSyncMetaById && typeof source.missionSyncMetaById === 'object'
+        ? source.missionSyncMetaById
+        : {};
+    const fallbackUpdatedAt = typeof source.updatedAt === 'string' && source.updatedAt
+        ? source.updatedAt
+        : '';
+    const fallbackUpdatedBy = typeof source.updatedBy === 'string' && source.updatedBy
+        ? source.updatedBy
+        : '';
+
+    const normalizedMetaById = Object.create(null);
+    Object.keys(rawMeta).sort().forEach(id => {
+        normalizedMetaById[String(id)] = normalizeMissionSyncMeta(rawMeta[id], {
+            updatedAt: fallbackUpdatedAt,
+            updatedBy: fallbackUpdatedBy
+        });
+    });
+
+    const missionsById = new Map();
+    rawMissions.forEach((mission, index) => {
+        const normalizedMission = normalizeMissionRecord(mission, index);
+        if (!normalizedMission) return;
+
+        const id = String(normalizedMission.id);
+        const meta = normalizedMetaById[id] = normalizeMissionSyncMeta(normalizedMetaById[id], {
+            updatedAt: fallbackUpdatedAt,
+            updatedBy: fallbackUpdatedBy
+        });
+
+        if (!meta.updatedAt && !meta.deletedAt) {
+            meta.updatedAt = fallbackUpdatedAt;
+            meta.updatedBy = fallbackUpdatedBy;
+        }
+
+        if (meta.deletedAt) return;
+        missionsById.set(id, normalizedMission);
+    });
+
+    return {
+        schemaVersion: Number(source.schemaVersion) || MISSION_CANONICAL_SCHEMA_VERSION,
+        revision: Number(source.revision) || 0,
+        updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : fallbackUpdatedAt,
+        updatedBy: typeof source.updatedBy === 'string' ? source.updatedBy : fallbackUpdatedBy,
+        missions: [...missionsById.values()].sort((a, b) => String(a.id).localeCompare(String(b.id))),
+        missionSyncMetaById: cloneMissionSyncMetaMap(normalizedMetaById),
+        sourceSignature: typeof runtime.sourceSignature === 'string' ? runtime.sourceSignature : '',
+        sourceLastModified: Number(runtime.sourceLastModified) || 0,
+        sourceSize: Number(runtime.sourceSize) || 0,
+        sourceWasEmpty: Boolean(runtime.sourceWasEmpty)
+    };
+}
+
+function buildMissionCanonicalDocument() {
+    const now = nowMissionTimestamp();
+    const normalizedMissions = [];
+    const normalizedMetaById = cloneMissionSyncMetaMap(missionSyncMetaById);
+    const activeMissions = Array.isArray(missions) ? missions : [];
+
+    activeMissions.forEach((mission, index) => {
+        const normalizedMission = normalizeMissionRecord(mission, index);
+        if (!normalizedMission) return;
+
+        const id = String(normalizedMission.id);
+        const meta = normalizeMissionSyncMeta(normalizedMetaById[id], {
+            updatedAt: now,
+            updatedBy: getMissionSyncClientId()
+        });
+        meta.updatedAt = meta.updatedAt || now;
+        meta.updatedBy = meta.updatedBy || getMissionSyncClientId();
+        meta.deletedAt = '';
+        meta.deletedBy = '';
+        normalizedMetaById[id] = meta;
+        normalizedMissions.push(normalizedMission);
+    });
+
+    normalizedMissions.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+
+    const baseRevision = Number(missionCanonicalDocument && missionCanonicalDocument.revision) || 0;
+
+    return {
+        schemaVersion: MISSION_CANONICAL_SCHEMA_VERSION,
+        revision: baseRevision + 1,
+        updatedAt: now,
+        updatedBy: getMissionSyncClientId(),
+        missions: normalizedMissions,
+        missionSyncMetaById: normalizedMetaById,
+        sourceSignature: missionCanonicalDocument && typeof missionCanonicalDocument.sourceSignature === 'string'
+            ? missionCanonicalDocument.sourceSignature
+            : '',
+        sourceLastModified: missionCanonicalDocument && Number(missionCanonicalDocument.sourceLastModified) ? Number(missionCanonicalDocument.sourceLastModified) : 0,
+        sourceSize: missionCanonicalDocument && Number(missionCanonicalDocument.sourceSize) ? Number(missionCanonicalDocument.sourceSize) : 0
+    };
+}
+
+function serializeMissionCanonicalDocument(document) {
+    const source = document && typeof document === 'object' ? document : {};
+    return JSON.stringify({
+        schemaVersion: Number(source.schemaVersion) || MISSION_CANONICAL_SCHEMA_VERSION,
+        revision: Number(source.revision) || 0,
+        updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : nowMissionTimestamp(),
+        updatedBy: typeof source.updatedBy === 'string' ? source.updatedBy : getMissionSyncClientId(),
+        missions: Array.isArray(source.missions) ? source.missions : [],
+        missionSyncMetaById: cloneMissionSyncMetaMap(source.missionSyncMetaById)
+    }, null, 2);
+}
+
+function getComparableMissionCanonicalPayload(document) {
+    const normalized = normalizeMissionCanonicalDocument(document);
+    return JSON.stringify({
+        missions: normalized.missions,
+        missionSyncMetaById: cloneMissionSyncMetaMap(normalized.missionSyncMetaById)
+    });
+}
+
+function storeMissionCanonicalDocumentLocally(document) {
+    try {
+        localStorage.setItem(MISSIONS_STORAGE_KEY, serializeMissionCanonicalDocument(document));
+    } catch {
+        // Ignore storage failures in file:// or restricted browser contexts.
+    }
+}
+
+function loadMissionCanonicalDocumentFromCache() {
+    try {
+        const raw = localStorage.getItem(MISSIONS_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return normalizeMissionCanonicalDocument(parsed);
+    } catch {
+        return null;
+    }
+}
+
+function applyMissionCanonicalDocumentToRuntime(document, options = {}) {
+    const normalizedDocument = normalizeMissionCanonicalDocument(document, {
+        sourceSignature: document && typeof document.sourceSignature === 'string' ? document.sourceSignature : '',
+        sourceLastModified: document && Number(document.sourceLastModified) ? Number(document.sourceLastModified) : 0,
+        sourceSize: document && Number(document.sourceSize) ? Number(document.sourceSize) : 0
+    });
+
+    missions = normalizedDocument.missions.map(cloneMissionRecord);
+    missionSyncMetaById = cloneMissionSyncMetaMap(normalizedDocument.missionSyncMetaById);
+    missionCanonicalDocument = {
+        ...normalizedDocument,
+        missions: normalizedDocument.missions.map(cloneMissionRecord),
+        missionSyncMetaById: cloneMissionSyncMetaMap(normalizedDocument.missionSyncMetaById)
+    };
+
+    if (options.persistLocalCache !== false) {
+        storeMissionCanonicalDocumentLocally(missionCanonicalDocument);
+    }
+
+    return missionCanonicalDocument;
+}
+
+function mergeMissionCanonicalDocuments(localDocument, remoteDocument) {
+    const localDoc = normalizeMissionCanonicalDocument(localDocument);
+    const remoteDoc = normalizeMissionCanonicalDocument(remoteDocument);
+    const localMissionMap = new Map(localDoc.missions.map(mission => [String(mission.id), mission]));
+    const remoteMissionMap = new Map(remoteDoc.missions.map(mission => [String(mission.id), mission]));
+    const mergedMetaById = Object.create(null);
+    const mergedMissions = [];
+    const ids = new Set([
+        ...Object.keys(localDoc.missionSyncMetaById || {}),
+        ...Object.keys(remoteDoc.missionSyncMetaById || {}),
+        ...localMissionMap.keys(),
+        ...remoteMissionMap.keys()
+    ]);
+
+    ids.forEach(id => {
+        const localMeta = normalizeMissionSyncMeta(localDoc.missionSyncMetaById[id]);
+        const remoteMeta = normalizeMissionSyncMeta(remoteDoc.missionSyncMetaById[id]);
+        const localMission = localMissionMap.get(id) || null;
+        const remoteMission = remoteMissionMap.get(id) || null;
+
+        if (localMeta.deletedAt || remoteMeta.deletedAt) {
+            const localDeleted = parseMissionTimestampMs(localMeta.deletedAt);
+            const remoteDeleted = parseMissionTimestampMs(remoteMeta.deletedAt);
+            mergedMetaById[id] = normalizeMissionSyncMeta(
+                remoteDeleted >= localDeleted ? remoteMeta : localMeta,
+                {
+                    updatedAt: remoteDoc.updatedAt || localDoc.updatedAt,
+                    updatedBy: remoteDoc.updatedBy || localDoc.updatedBy
+                }
+            );
+            if (!mergedMetaById[id].deletedAt) {
+                mergedMetaById[id].deletedAt = nowMissionTimestamp();
+            }
+            return;
+        }
+
+        if (localMission && remoteMission) {
+            const localUpdated = parseMissionTimestampMs(localMeta.updatedAt || localDoc.updatedAt);
+            const remoteUpdated = parseMissionTimestampMs(remoteMeta.updatedAt || remoteDoc.updatedAt);
+            if (remoteUpdated >= localUpdated) {
+                mergedMissions.push(cloneMissionRecord(remoteMission));
+                mergedMetaById[id] = normalizeMissionSyncMeta(remoteMeta, {
+                    updatedAt: remoteDoc.updatedAt,
+                    updatedBy: remoteDoc.updatedBy
+                });
+            } else {
+                mergedMissions.push(cloneMissionRecord(localMission));
+                mergedMetaById[id] = normalizeMissionSyncMeta(localMeta, {
+                    updatedAt: localDoc.updatedAt,
+                    updatedBy: localDoc.updatedBy
+                });
+            }
+            return;
+        }
+
+        if (remoteMission) {
+            mergedMissions.push(cloneMissionRecord(remoteMission));
+            mergedMetaById[id] = normalizeMissionSyncMeta(remoteMeta, {
+                updatedAt: remoteDoc.updatedAt,
+                updatedBy: remoteDoc.updatedBy
+            });
+            return;
+        }
+
+        if (localMission) {
+            mergedMissions.push(cloneMissionRecord(localMission));
+            mergedMetaById[id] = normalizeMissionSyncMeta(localMeta, {
+                updatedAt: localDoc.updatedAt,
+                updatedBy: localDoc.updatedBy
+            });
+            return;
+        }
+
+        if (localMeta.updatedAt || localMeta.deletedAt || remoteMeta.updatedAt || remoteMeta.deletedAt) {
+            mergedMetaById[id] = normalizeMissionSyncMeta(remoteMeta.updatedAt || remoteMeta.deletedAt ? remoteMeta : localMeta, {
+                updatedAt: remoteDoc.updatedAt || localDoc.updatedAt,
+                updatedBy: remoteDoc.updatedBy || localDoc.updatedBy
+            });
+        }
+    });
+
+    mergedMissions.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+
+    return {
+        schemaVersion: MISSION_CANONICAL_SCHEMA_VERSION,
+        revision: Math.max(Number(localDoc.revision) || 0, Number(remoteDoc.revision) || 0),
+        updatedAt: remoteDoc.updatedAt || localDoc.updatedAt || nowMissionTimestamp(),
+        updatedBy: remoteDoc.updatedBy || localDoc.updatedBy || getMissionSyncClientId(),
+        missions: mergedMissions,
+        missionSyncMetaById: mergedMetaById,
+        sourceSignature: remoteDoc.sourceSignature || localDoc.sourceSignature || '',
+        sourceLastModified: remoteDoc.sourceLastModified || localDoc.sourceLastModified || 0,
+        sourceSize: remoteDoc.sourceSize || localDoc.sourceSize || 0
+    };
+}
+
+async function readMissionCanonicalDocumentFromHandle(handle) {
+    if (!handle) return null;
+
+    try {
+        const file = await handle.getFile();
+        const signature = `${file.lastModified || 0}:${file.size || 0}`;
+        const text = await file.text();
+        if (!text || !text.trim()) {
+            return {
+                schemaVersion: MISSION_CANONICAL_SCHEMA_VERSION,
+                revision: 0,
+                updatedAt: '',
+                updatedBy: '',
+                missions: [],
+                missionSyncMetaById: Object.create(null),
+                sourceSignature: signature,
+                sourceLastModified: file.lastModified || 0,
+                sourceSize: file.size || 0,
+                sourceWasEmpty: true
+            };
+        }
+
+        const parsed = JSON.parse(text);
+        return normalizeMissionCanonicalDocument(parsed, {
+            sourceSignature: signature,
+            sourceLastModified: file.lastModified || 0,
+            sourceSize: file.size || 0,
+            sourceWasEmpty: false
+        });
+    } catch (error) {
+        console.warn('Failed to read canonical mission data.', error);
+        return null;
+    }
+}
+
+async function syncMissionCanonicalDocumentFromHandle(options = {}) {
+    const { force = false, initializeIfEmpty = false } = options;
+    if (missionCanonicalReloadInProgress) return null;
+
+    const handle = await loadMissionDataHandle();
+    if (!handle) return null;
+    if (!force && (missionCanonicalWriteInFlight || missionCanonicalLocalDirty || editingMissionId != null)) {
+        return null;
+    }
+
+    missionCanonicalReloadInProgress = true;
+    try {
+        const remoteDocument = await readMissionCanonicalDocumentFromHandle(handle);
+        const remoteWasEmpty = Boolean(remoteDocument && remoteDocument.sourceWasEmpty);
+        const localDocument = missionCanonicalDocument || loadMissionCanonicalDocumentFromCache() || buildMissionCanonicalDocument();
+
+        if (!remoteDocument) {
+            if (initializeIfEmpty) {
+                const initialDocument = localDocument || buildMissionCanonicalDocument();
+                if (initialDocument) {
+                    await queueMissionDataDiskWrite(initialDocument);
+                    applyMissionCanonicalDocumentToRuntime(initialDocument);
+                    return initialDocument;
+                }
+            }
+            return null;
+        }
+
+        const mergedDocument = localDocument
+            ? mergeMissionCanonicalDocuments(localDocument, remoteDocument)
+            : remoteDocument;
+
+        applyMissionCanonicalDocumentToRuntime(mergedDocument);
+        renderTimeline();
+        renderMissionCards();
+        if (activeTooltipMissionId != null) {
+            refreshTooltipForMission(activeTooltipMissionId);
+        }
+
+        if (remoteWasEmpty || (localDocument && getComparableMissionCanonicalPayload(mergedDocument) !== getComparableMissionCanonicalPayload(remoteDocument))) {
+            void queueMissionDataDiskWrite(mergedDocument);
+        }
+
+        return mergedDocument;
+    } finally {
+        missionCanonicalReloadInProgress = false;
+    }
+}
+
+function getMissionSyncMode() {
+    return normalizeMissionSyncBackend(missionDefaults.syncBackend);
+}
+
+function getMissionSyncPollIntervalMs() {
+    if (isSharePointSyncMode()) {
+        return MISSION_SHAREPOINT_SYNC_POLL_MS;
+    }
+
+    if (isOneDriveSyncMode()) {
+        return MISSION_ONEDRIVE_SYNC_POLL_MS;
+    }
+
+    return MISSION_CANONICAL_SYNC_POLL_MS;
+}
+
+function isSharePointSyncMode() {
+    return getMissionSyncMode() === 'sharepoint-list';
+}
+
+function isOneDriveSyncMode() {
+    return getMissionSyncMode() === 'onedrive-file';
+}
+
+function isLocalFileSyncMode() {
+    return getMissionSyncMode() === 'local-file';
+}
+
+async function syncMissionCanonicalDocumentFromActiveBackend(options = {}) {
+    if (isSharePointSyncMode()) {
+        return syncMissionCanonicalDocumentFromSharePointList(options);
+    }
+
+    if (isOneDriveSyncMode()) {
+        return syncMissionCanonicalDocumentFromOneDriveFile(options);
+    }
+
+    return syncMissionCanonicalDocumentFromHandle(options);
+}
+
+function startMissionCanonicalSyncLoop() {
+    attachMissionCanonicalSyncObservers();
+
+    const intervalMs = getMissionSyncPollIntervalMs();
+    if (missionCanonicalSyncTimer && missionCanonicalSyncIntervalMs === intervalMs) return;
+
+    if (missionCanonicalSyncTimer) {
+        window.clearInterval(missionCanonicalSyncTimer);
+        missionCanonicalSyncTimer = null;
+    }
+
+    missionCanonicalSyncIntervalMs = intervalMs;
+    missionCanonicalSyncTimer = window.setInterval(() => {
+        void syncMissionCanonicalDocumentFromActiveBackend();
+    }, intervalMs);
+}
+
+function stopMissionCanonicalSyncLoop() {
+    if (!missionCanonicalSyncTimer) return;
+    window.clearInterval(missionCanonicalSyncTimer);
+    missionCanonicalSyncTimer = null;
+    missionCanonicalSyncIntervalMs = 0;
+}
+
+function attachMissionCanonicalSyncObservers() {
+    if (missionCanonicalSyncObserversAttached) return;
+    missionCanonicalSyncObserversAttached = true;
+
+    window.addEventListener('focus', () => {
+        void syncMissionCanonicalDocumentFromActiveBackend();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            void syncMissionCanonicalDocumentFromActiveBackend();
+        }
+    });
+
+    window.addEventListener('online', () => {
+        void syncMissionCanonicalDocumentFromActiveBackend();
+    });
+
+    window.addEventListener('pagehide', () => {
+        if (missionCanonicalLocalDirty || missionCanonicalWriteInFlight) {
+            void queueMissionCanonicalDocumentWrite();
+        }
+    });
+}
+
 function syncMissionDefaultsForm() {
     if (missionHomeFieldInput) missionHomeFieldInput.value = missionDefaults.homeField ?? '';
     if (missionTailNumbersInput) missionTailNumbersInput.value = missionDefaults.availableTailNumbers ?? '';
     if (missionDataPathInput) missionDataPathInput.value = missionDefaults.missionDataPath ?? '';
+    if (missionSyncBackendInput) missionSyncBackendInput.value = getMissionSyncMode();
+    if (missionOneDriveTenantIdInput) missionOneDriveTenantIdInput.value = missionDefaults.oneDriveTenantId ?? '';
+    if (missionOneDriveClientIdInput) missionOneDriveClientIdInput.value = missionDefaults.oneDriveClientId ?? '';
+    if (missionOneDriveFilePathInput) missionOneDriveFilePathInput.value = missionDefaults.oneDriveFilePath || 'themis_operations_missions.json';
+    if (missionOneDriveRedirectUriInput) missionOneDriveRedirectUriInput.value = missionDefaults.oneDriveRedirectUri ?? '';
+    if (missionOneDriveItemIdInput) missionOneDriveItemIdInput.value = missionDefaults.oneDriveItemId ?? '';
+    if (missionOneDriveItemETagInput) missionOneDriveItemETagInput.value = missionDefaults.oneDriveItemETag ?? '';
+    if (missionSharePointTenantIdInput) missionSharePointTenantIdInput.value = missionDefaults.sharePointTenantId ?? '';
+    if (missionSharePointClientIdInput) missionSharePointClientIdInput.value = missionDefaults.sharePointClientId ?? '';
+    if (missionSharePointSiteIdInput) missionSharePointSiteIdInput.value = missionDefaults.sharePointSiteId ?? '';
+    if (missionSharePointListIdentifierInput) missionSharePointListIdentifierInput.value = missionDefaults.sharePointListIdentifier ?? '';
+    if (missionSharePointItemTitleInput) missionSharePointItemTitleInput.value = missionDefaults.sharePointItemTitle ?? SHAREPOINT_CANONICAL_ITEM_TITLE;
+    if (missionSharePointPayloadFieldInput) missionSharePointPayloadFieldInput.value = missionDefaults.sharePointPayloadField ?? SHAREPOINT_DEFAULT_PAYLOAD_FIELD;
+    if (missionSharePointRedirectUriInput) missionSharePointRedirectUriInput.value = missionDefaults.sharePointRedirectUri ?? '';
+    if (missionSharePointItemIdInput) missionSharePointItemIdInput.value = missionDefaults.sharePointItemId ?? '';
+    if (missionSharePointItemETagInput) missionSharePointItemETagInput.value = missionDefaults.sharePointItemETag ?? '';
+    toggleMissionSyncSettingsVisibility();
+    updateSharePointStatusFromState();
+    updateOneDriveStatusFromState();
 }
 
 function readMissionDefaultsForm() {
     return {
+        ...missionDefaults,
         homeField: missionHomeFieldInput ? missionHomeFieldInput.value.trim() : '',
         missionDataPath: missionDataPathInput ? missionDataPathInput.value.trim() : '',
-        availableTailNumbers: missionTailNumbersInput ? missionTailNumbersInput.value.trim() : ''
+        availableTailNumbers: missionTailNumbersInput ? missionTailNumbersInput.value.trim() : '',
+        syncBackend: missionSyncBackendInput ? normalizeMissionSyncBackend(missionSyncBackendInput.value) : getMissionSyncMode(),
+        oneDriveTenantId: missionOneDriveTenantIdInput ? missionOneDriveTenantIdInput.value.trim() : '',
+        oneDriveClientId: missionOneDriveClientIdInput ? missionOneDriveClientIdInput.value.trim() : '',
+        oneDriveFilePath: missionOneDriveFilePathInput ? (missionOneDriveFilePathInput.value.trim() || 'themis_operations_missions.json') : 'themis_operations_missions.json',
+        oneDriveRedirectUri: missionOneDriveRedirectUriInput ? missionOneDriveRedirectUriInput.value.trim() : '',
+        oneDriveItemId: missionOneDriveItemIdInput ? missionOneDriveItemIdInput.value.trim() : '',
+        oneDriveItemETag: missionOneDriveItemETagInput ? missionOneDriveItemETagInput.value.trim() : '',
+        sharePointTenantId: missionSharePointTenantIdInput ? missionSharePointTenantIdInput.value.trim() : '',
+        sharePointClientId: missionSharePointClientIdInput ? missionSharePointClientIdInput.value.trim() : '',
+        sharePointSiteId: missionSharePointSiteIdInput ? missionSharePointSiteIdInput.value.trim() : '',
+        sharePointListIdentifier: missionSharePointListIdentifierInput ? missionSharePointListIdentifierInput.value.trim() : '',
+        sharePointItemTitle: missionSharePointItemTitleInput ? missionSharePointItemTitleInput.value.trim() : SHAREPOINT_CANONICAL_ITEM_TITLE,
+        sharePointPayloadField: missionSharePointPayloadFieldInput ? missionSharePointPayloadFieldInput.value.trim() : SHAREPOINT_DEFAULT_PAYLOAD_FIELD,
+        sharePointRedirectUri: missionSharePointRedirectUriInput ? missionSharePointRedirectUriInput.value.trim() : '',
+        sharePointItemId: missionSharePointItemIdInput ? missionSharePointItemIdInput.value.trim() : '',
+        sharePointItemETag: missionSharePointItemETagInput ? missionSharePointItemETagInput.value.trim() : ''
     };
+}
+
+function toggleMissionSyncSettingsVisibility() {
+    const localFileMode = isLocalFileSyncMode();
+    const sharePointMode = isSharePointSyncMode();
+    const oneDriveMode = isOneDriveSyncMode();
+
+    if (localSyncSettingsContainer) {
+        localSyncSettingsContainer.hidden = !localFileMode;
+    }
+
+    if (sharePointSyncSettingsContainer) {
+        sharePointSyncSettingsContainer.hidden = !sharePointMode;
+    }
+
+    if (oneDriveSyncSettingsContainer) {
+        oneDriveSyncSettingsContainer.hidden = !oneDriveMode;
+    }
+
+    if (sharePointStatusPanel) {
+        sharePointStatusPanel.hidden = !sharePointMode;
+    }
+
+    if (oneDriveStatusPanel) {
+        oneDriveStatusPanel.hidden = !oneDriveMode;
+    }
+
+    const missionDataButton = document.getElementById('btn-choose-mission-data-file');
+    if (missionDataPathInput) missionDataPathInput.disabled = !localFileMode;
+    if (missionDataButton) missionDataButton.disabled = !localFileMode;
+    if (sharePointConnectButton) sharePointConnectButton.disabled = !sharePointMode;
+    if (sharePointSyncNowButton) sharePointSyncNowButton.disabled = !sharePointMode;
+    if (oneDriveConnectButton) oneDriveConnectButton.disabled = !oneDriveMode;
+    if (oneDriveSyncNowButton) oneDriveSyncNowButton.disabled = !oneDriveMode;
+}
+
+function activateMissionSyncBackend() {
+    stopMissionCanonicalSyncLoop();
+
+    if (isSharePointSyncMode()) {
+        updateSharePointStatusFromState();
+        if (hasSharePointSyncConfiguration()) {
+            void syncSharePointNow();
+        }
+        return;
+    }
+
+    if (isOneDriveSyncMode()) {
+        updateOneDriveStatusFromState();
+        if (hasOneDriveSyncConfiguration()) {
+            void syncOneDriveNow();
+        }
+        return;
+    }
+
+    updateSharePointStatusFromState();
+    updateOneDriveStatusFromState();
+
+    void loadMissionDataHandle().then(handle => {
+        if (handle) {
+            void syncMissionCanonicalDocumentFromHandle({ force: true, initializeIfEmpty: true })
+                .then(() => startMissionCanonicalSyncLoop());
+        }
+    });
+}
+
+function setSharePointStatus(message, state = 'idle') {
+    if (!missionSharePointStatusInput) return;
+    missionSharePointStatusInput.textContent = message;
+    missionSharePointStatusInput.classList.remove('connected', 'error');
+    if (state === 'connected') {
+        missionSharePointStatusInput.classList.add('connected');
+    } else if (state === 'error') {
+        missionSharePointStatusInput.classList.add('error');
+    }
+}
+
+function updateSharePointStatusFromState(message = null, state = 'idle') {
+    if (message) {
+        setSharePointStatus(message, state);
+        return;
+    }
+
+    if (!isSharePointSyncMode()) {
+        setSharePointStatus('Local file sync');
+        return;
+    }
+
+    if (missionDefaults.sharePointItemId) {
+        setSharePointStatus(`Connected to SharePoint item ${missionDefaults.sharePointItemId}`, 'connected');
+        return;
+    }
+
+    if (missionDefaults.sharePointSiteId && missionDefaults.sharePointListIdentifier) {
+        setSharePointStatus('SharePoint configured, not connected yet');
+        return;
+    }
+
+    setSharePointStatus('SharePoint config incomplete');
+}
+
+function setOneDriveStatus(message, state = 'idle') {
+    if (!missionOneDriveStatusInput) return;
+    missionOneDriveStatusInput.textContent = message;
+    missionOneDriveStatusInput.classList.remove('connected', 'error');
+    if (state === 'connected') {
+        missionOneDriveStatusInput.classList.add('connected');
+    } else if (state === 'error') {
+        missionOneDriveStatusInput.classList.add('error');
+    }
+}
+
+function updateOneDriveStatusFromState(message = null, state = 'idle') {
+    if (message) {
+        setOneDriveStatus(message, state);
+        return;
+    }
+
+    if (!isOneDriveSyncMode()) {
+        setOneDriveStatus('Local file sync');
+        return;
+    }
+
+    if (missionDefaults.oneDriveItemId) {
+        setOneDriveStatus(`Connected to OneDrive file ${missionDefaults.oneDriveFilePath || missionDefaults.oneDriveItemId}`, 'connected');
+        return;
+    }
+
+    if (missionDefaults.oneDriveClientId && missionDefaults.oneDriveFilePath) {
+        setOneDriveStatus('OneDrive configured, not connected yet');
+        return;
+    }
+
+    setOneDriveStatus('OneDrive config incomplete');
 }
 
 function getMissionDataFileName(pathValue) {
@@ -118,7 +974,10 @@ function getMissionDataFileName(pathValue) {
 }
 
 function supportsMissionDataFileAccess() {
-    return typeof window.showSaveFilePicker === 'function' && window.isSecureContext;
+    return window.isSecureContext && (
+        typeof window.showOpenFilePicker === 'function' ||
+        typeof window.showSaveFilePicker === 'function'
+    );
 }
 
 function openMissionDataHandleDatabase() {
@@ -179,6 +1038,7 @@ async function clearStoredMissionDataHandle() {
     missionDataFileHandleLoadToken += 1;
     missionDataFileHandle = null;
     missionDataFileHandleLoadPromise = null;
+    stopMissionCanonicalSyncLoop();
 
     const db = await openMissionDataHandleDatabase();
     if (!db) return;
@@ -242,17 +1102,33 @@ async function requestMissionDataHandle() {
     }
 
     const suggestedName = getMissionDataFileName(missionDataPathInput ? missionDataPathInput.value : '');
+    const pickerTypes = [
+        {
+            description: 'Mission JSON',
+            accept: { 'application/json': ['.json'] }
+        }
+    ];
 
     try {
-        const handle = await window.showSaveFilePicker({
-            suggestedName,
-            types: [
-                {
-                    description: 'Mission JSON',
-                    accept: { 'application/json': ['.json'] }
-                }
-            ]
-        });
+        let handle = null;
+
+        if (typeof window.showOpenFilePicker === 'function') {
+            const handles = await window.showOpenFilePicker({
+                mode: 'readwrite',
+                multiple: false,
+                startIn: 'documents',
+                types: pickerTypes
+            });
+            handle = Array.isArray(handles) ? handles[0] : handles;
+        } else {
+            handle = await window.showSaveFilePicker({
+                suggestedName,
+                startIn: 'documents',
+                types: pickerTypes
+            });
+        }
+
+        if (!handle) return null;
 
         missionDataFileHandle = handle;
         missionDataFileHandleDisabled = false;
@@ -267,7 +1143,8 @@ async function requestMissionDataHandle() {
         missionDefaults.missionDataPath = handle.name || suggestedName;
         syncMissionDefaultsForm();
         persistMissionDefaults();
-        await queueMissionDataDiskWrite();
+        await syncMissionCanonicalDocumentFromHandle({ force: true, initializeIfEmpty: true });
+        startMissionCanonicalSyncLoop();
 
         return handle;
     } catch (error) {
@@ -277,10 +1154,12 @@ async function requestMissionDataHandle() {
     }
 }
 
-async function writeMissionDataToDisk() {
+async function writeMissionDataToDisk(document = null) {
     const handle = await loadMissionDataHandle();
     if (!handle) return false;
+    const snapshot = normalizeMissionCanonicalDocument(document || missionCanonicalDocument || buildMissionCanonicalDocument());
     const writeToken = missionDataFileHandleLoadToken;
+    missionCanonicalWriteInFlight = true;
 
     try {
         if (missionDataFileHandleDisabled || writeToken !== missionDataFileHandleLoadToken) return false;
@@ -295,6 +1174,23 @@ async function writeMissionDataToDisk() {
 
         if (missionDataFileHandleDisabled || writeToken !== missionDataFileHandleLoadToken) return false;
 
+        const latestRemote = await readMissionCanonicalDocumentFromHandle(handle);
+        let docToWrite = snapshot;
+        if (latestRemote) {
+            docToWrite = mergeMissionCanonicalDocuments(latestRemote, snapshot);
+        }
+
+        docToWrite = {
+            ...docToWrite,
+            revision: Math.max(
+                Number(docToWrite.revision) || 0,
+                Number(snapshot.revision) || 0,
+                latestRemote ? Number(latestRemote.revision) || 0 : 0
+            ),
+            updatedAt: nowMissionTimestamp(),
+            updatedBy: getMissionSyncClientId()
+        };
+
         const writable = await handle.createWritable();
         if (missionDataFileHandleDisabled || writeToken !== missionDataFileHandleLoadToken) {
             if (typeof writable.abort === 'function') {
@@ -307,23 +1203,1367 @@ async function writeMissionDataToDisk() {
             return false;
         }
 
-        await writable.write(JSON.stringify(missions, null, 2));
+        await writable.write(serializeMissionCanonicalDocument(docToWrite));
         await writable.close();
+        missionCanonicalDocument = {
+            ...docToWrite,
+            missions: docToWrite.missions.map(cloneMissionRecord),
+            missionSyncMetaById: cloneMissionSyncMetaMap(docToWrite.missionSyncMetaById)
+        };
+        missions = missionCanonicalDocument.missions.map(cloneMissionRecord);
+        missionSyncMetaById = cloneMissionSyncMetaMap(missionCanonicalDocument.missionSyncMetaById);
+        storeMissionCanonicalDocumentLocally(missionCanonicalDocument);
+        missionCanonicalLocalDirty = false;
         return true;
     } catch (error) {
         console.warn('Failed to write mission data to disk.', error);
         return false;
+    } finally {
+        missionCanonicalWriteInFlight = false;
     }
 }
 
-function queueMissionDataDiskWrite() {
+function queueMissionDataDiskWrite(document = null) {
     missionDataFileWriteQueue = missionDataFileWriteQueue
-        .then(() => writeMissionDataToDisk())
+        .then(() => writeMissionDataToDisk(document))
         .catch(error => {
             console.warn('Mission data disk write queue failed.', error);
         });
 
     return missionDataFileWriteQueue;
+}
+
+function queueMissionCanonicalDocumentWrite(document = null) {
+    if (isSharePointSyncMode()) {
+        if (!hasSharePointSyncConfiguration()) {
+            return Promise.resolve(false);
+        }
+        return queueSharePointListWrite(document);
+    }
+
+    if (isOneDriveSyncMode()) {
+        if (!hasOneDriveSyncConfiguration()) {
+            return Promise.resolve(false);
+        }
+        return queueOneDriveFileWrite(document);
+    }
+
+    return queueMissionDataDiskWrite(document);
+}
+
+function supportsOneDriveSyncTransport() {
+    return window.isSecureContext && typeof fetch === 'function' && typeof msal !== 'undefined';
+}
+
+function getOneDriveTenantId() {
+    return missionDefaults.oneDriveTenantId ? missionDefaults.oneDriveTenantId.trim() : '';
+}
+
+function getOneDriveClientId() {
+    return missionDefaults.oneDriveClientId ? missionDefaults.oneDriveClientId.trim() : '';
+}
+
+function getOneDriveFilePath() {
+    const configured = missionDefaults.oneDriveFilePath ? missionDefaults.oneDriveFilePath.trim() : '';
+    return normalizeOneDriveFilePath(configured || 'themis_operations_missions.json');
+}
+
+function getOneDriveRedirectUri() {
+    const configured = missionDefaults.oneDriveRedirectUri ? missionDefaults.oneDriveRedirectUri.trim() : '';
+    if (configured) return configured;
+    return window.location.href.split('#')[0];
+}
+
+function getOneDriveConfigSignature() {
+    return [
+        getOneDriveTenantId(),
+        getOneDriveClientId(),
+        getOneDriveRedirectUri()
+    ].join('|');
+}
+
+function hasOneDriveSyncConfiguration() {
+    return Boolean(getOneDriveClientId() && getOneDriveFilePath());
+}
+
+function getOneDriveAuthority() {
+    const tenantId = getOneDriveTenantId();
+    return `https://login.microsoftonline.com/${tenantId || 'common'}`;
+}
+
+function getOneDriveScopes() {
+    return ['Files.ReadWrite'];
+}
+
+function resetOneDriveAuthClient() {
+    oneDriveAuthClient = null;
+    oneDriveAuthConfigSignature = '';
+    oneDriveActiveAccount = null;
+}
+
+function getOneDriveResolutionSignature() {
+    return [getOneDriveFilePath()].join('|');
+}
+
+function normalizeOneDriveFilePath(pathValue) {
+    if (typeof pathValue !== 'string') return '';
+    return pathValue
+        .trim()
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .replace(/\/{2,}/g, '/')
+        .replace(/\/+$/, '');
+}
+
+function encodeOneDrivePathSegments(pathValue) {
+    const normalized = normalizeOneDriveFilePath(pathValue);
+    if (!normalized) return '';
+    return normalized
+        .split('/')
+        .filter(Boolean)
+        .map(segment => encodeURIComponent(segment))
+        .join('/');
+}
+
+function buildOneDriveItemPathByPath(pathValue) {
+    const encodedPath = encodeOneDrivePathSegments(pathValue);
+    return encodedPath ? `/me/drive/root:/${encodedPath}` : null;
+}
+
+function buildOneDriveItemContentPathByPath(pathValue) {
+    const itemPath = buildOneDriveItemPathByPath(pathValue);
+    return itemPath ? `${itemPath}:/content` : null;
+}
+
+function buildOneDriveItemPathById(itemId) {
+    const encodedItemId = encodeURIComponent(String(itemId));
+    return `/me/drive/items/${encodedItemId}`;
+}
+
+function buildOneDriveItemContentPathById(itemId) {
+    return `${buildOneDriveItemPathById(itemId)}/content`;
+}
+
+function updateOneDriveItemReference(record) {
+    const itemId = record && record.id != null ? String(record.id) : '';
+    const etag = record && typeof (record.eTag || record['@odata.etag'] || record.etag) === 'string'
+        ? String(record.eTag || record['@odata.etag'] || record.etag)
+        : '';
+
+    oneDriveResolvedItemId = itemId;
+    oneDriveResolvedItemSignature = getOneDriveResolutionSignature();
+
+    if ((missionDefaults.oneDriveItemId || '') !== itemId) {
+        missionDefaults.oneDriveItemId = itemId;
+    }
+
+    if ((missionDefaults.oneDriveItemETag || '') !== etag) {
+        missionDefaults.oneDriveItemETag = etag;
+    }
+
+    persistMissionDefaults();
+    if (missionOneDriveItemIdInput) missionOneDriveItemIdInput.value = missionDefaults.oneDriveItemId ?? '';
+    if (missionOneDriveItemETagInput) missionOneDriveItemETagInput.value = missionDefaults.oneDriveItemETag ?? '';
+    updateOneDriveStatusFromState();
+}
+
+function clearOneDriveItemReference() {
+    oneDriveResolvedItemId = '';
+    oneDriveResolvedItemSignature = '';
+
+    if (missionDefaults.oneDriveItemId) {
+        missionDefaults.oneDriveItemId = '';
+    }
+
+    if (missionDefaults.oneDriveItemETag) {
+        missionDefaults.oneDriveItemETag = '';
+    }
+}
+
+async function getOneDriveAuthClient() {
+    const signature = getOneDriveConfigSignature();
+    if (oneDriveAuthClient && oneDriveAuthConfigSignature === signature) {
+        return oneDriveAuthClient;
+    }
+
+    if (!supportsOneDriveSyncTransport()) {
+        throw new Error('OneDrive sync requires Microsoft auth support in a secure browser context.');
+    }
+
+    const clientId = getOneDriveClientId();
+    if (!clientId) {
+        throw new Error('OneDrive client ID is required.');
+    }
+
+    oneDriveAuthClient = new msal.PublicClientApplication({
+        auth: {
+            clientId,
+            authority: getOneDriveAuthority(),
+            redirectUri: getOneDriveRedirectUri(),
+            navigateToLoginRequestUrl: false
+        },
+        cache: {
+            cacheLocation: 'localStorage',
+            storeAuthStateInCookie: false
+        }
+    });
+    oneDriveAuthConfigSignature = signature;
+    oneDriveActiveAccount = oneDriveAuthClient.getAllAccounts()[0] || null;
+    return oneDriveAuthClient;
+}
+
+async function getOneDriveAccessToken(options = {}) {
+    const interactive = Boolean(options.interactive);
+    const client = await getOneDriveAuthClient();
+    const scopes = getOneDriveScopes();
+    const account = oneDriveActiveAccount || client.getAllAccounts()[0] || null;
+
+    if (account) {
+        try {
+            const tokenResult = await client.acquireTokenSilent({
+                scopes,
+                account
+            });
+            oneDriveActiveAccount = tokenResult.account || account;
+            return tokenResult.accessToken;
+        } catch (error) {
+            if (!interactive) return null;
+        }
+    }
+
+    if (!interactive) return null;
+
+    const loginResult = await client.loginPopup({
+        scopes,
+        prompt: 'select_account'
+    });
+    oneDriveActiveAccount = loginResult.account || null;
+    if (loginResult.accessToken) return loginResult.accessToken;
+
+    const retryResult = await client.acquireTokenSilent({
+        scopes,
+        account: oneDriveActiveAccount
+    });
+    return retryResult.accessToken;
+}
+
+async function graphOneDriveRequest(path, options = {}) {
+    const token = await getOneDriveAccessToken({ interactive: Boolean(options.interactive) });
+    if (!token) return null;
+
+    const headers = new Headers(options.headers || {});
+    headers.set('Authorization', `Bearer ${token}`);
+    if (options.body != null && !headers.has('Content-Type') && options.method && options.method !== 'GET' && options.method !== 'HEAD') {
+        headers.set('Content-Type', 'application/json');
+    }
+
+    const response = await fetch(`${SHAREPOINT_GRAPH_BASE_URL}${path}`, {
+        method: options.method || 'GET',
+        headers,
+        body: options.body,
+        cache: 'no-store'
+    });
+
+    const responseText = await response.text();
+    let responseBody = null;
+    if (responseText && options.responseType !== 'text') {
+        try {
+            responseBody = JSON.parse(responseText);
+        } catch {
+            responseBody = responseText;
+        }
+    }
+
+    if (!response.ok) {
+        const error = new Error(graphErrorMessage({ body: responseBody, message: response.statusText }, `OneDrive request failed with status ${response.status}.`));
+        error.status = response.status;
+        error.body = responseBody;
+        throw error;
+    }
+
+    if (options.responseType === 'text') {
+        return responseText;
+    }
+
+    if (responseBody == null && response.status === 204) {
+        return {};
+    }
+
+    if (responseBody == null && responseText) {
+        try {
+            return JSON.parse(responseText);
+        } catch {
+            return responseText;
+        }
+    }
+
+    return responseBody;
+}
+
+async function findOneDriveCanonicalItemRecord(options = {}) {
+    const interactive = Boolean(options.interactive);
+    const storedItemId = missionDefaults.oneDriveItemId ? missionDefaults.oneDriveItemId.trim() : '';
+    const resolutionSignature = getOneDriveResolutionSignature();
+    const filePath = getOneDriveFilePath();
+
+    if (!hasOneDriveSyncConfiguration()) return null;
+
+    if (storedItemId && oneDriveResolvedItemId === storedItemId && oneDriveResolvedItemSignature === resolutionSignature) {
+        try {
+            const itemPath = buildOneDriveItemPathById(storedItemId);
+            const record = await graphOneDriveRequest(itemPath, {
+                interactive
+            });
+            if (record) return record;
+        } catch (error) {
+            if (error && error.status !== 404) {
+                throw error;
+            }
+        }
+    }
+
+    if (storedItemId) {
+        try {
+            const itemPath = buildOneDriveItemPathById(storedItemId);
+            const record = await graphOneDriveRequest(itemPath, {
+                interactive
+            });
+            if (record) {
+                oneDriveResolvedItemId = String(record.id || storedItemId);
+                oneDriveResolvedItemSignature = resolutionSignature;
+                return record;
+            }
+        } catch (error) {
+            if (error && error.status !== 404) {
+                throw error;
+            }
+        }
+    }
+
+    if (!filePath) return null;
+
+    const itemPath = buildOneDriveItemPathByPath(filePath);
+    if (!itemPath) return null;
+
+    const record = await graphOneDriveRequest(itemPath, {
+        interactive
+    });
+
+    if (record) {
+        oneDriveResolvedItemId = String(record.id || '');
+        oneDriveResolvedItemSignature = resolutionSignature;
+    }
+
+    return record || null;
+}
+
+async function parseOneDriveCanonicalDocumentFromRecord(record) {
+    const itemId = record && record.id != null ? String(record.id) : '';
+    const fileName = record && typeof record.name === 'string' && record.name.trim()
+        ? record.name.trim()
+        : getOneDriveFilePath();
+
+    if (!itemId) {
+        return normalizeMissionCanonicalDocument({
+            schemaVersion: MISSION_CANONICAL_SCHEMA_VERSION,
+            revision: 0,
+            updatedAt: '',
+            updatedBy: '',
+            missions: [],
+            missionSyncMetaById: Object.create(null)
+        }, {
+            sourceSignature: `onedrive:${getOneDriveFilePath()}:unknown`,
+            sourceWasEmpty: true
+        });
+    }
+
+    const payload = await graphOneDriveRequest(buildOneDriveItemContentPathById(itemId), {
+        interactive: false,
+        responseType: 'text'
+    });
+
+    if (payload == null) {
+        throw new Error(`OneDrive file content could not be read for file ${fileName || itemId}.`);
+    }
+
+    if (typeof payload !== 'string') {
+        throw new Error(`OneDrive file content could not be read for file ${fileName || itemId}.`);
+    }
+
+    if (!payload.trim()) {
+        return normalizeMissionCanonicalDocument({
+            schemaVersion: MISSION_CANONICAL_SCHEMA_VERSION,
+            revision: 0,
+            updatedAt: '',
+            updatedBy: '',
+            missions: [],
+            missionSyncMetaById: Object.create(null)
+        }, {
+            sourceSignature: `onedrive:${getOneDriveFilePath()}:${itemId}`,
+            sourceWasEmpty: true
+        });
+    }
+
+    try {
+        const parsed = JSON.parse(payload);
+        return normalizeMissionCanonicalDocument(parsed, {
+            sourceSignature: `onedrive:${getOneDriveFilePath()}:${itemId}`,
+            sourceLastModified: 0,
+            sourceSize: payload.length,
+            sourceWasEmpty: false
+        });
+    } catch {
+        throw new Error(`OneDrive payload is not valid JSON for file ${fileName || itemId}.`);
+    }
+}
+
+async function createOneDriveCanonicalItemRecord(document) {
+    const contentPath = buildOneDriveItemContentPathByPath(getOneDriveFilePath());
+    if (!contentPath) return null;
+
+    return graphOneDriveRequest(contentPath, {
+        method: 'PUT',
+        interactive: false,
+        body: serializeMissionCanonicalDocument(document)
+    });
+}
+
+async function updateOneDriveCanonicalItemRecord(itemId, document, etag = '') {
+    const headers = {};
+    headers['If-Match'] = etag || '*';
+
+    const contentPath = buildOneDriveItemContentPathById(itemId);
+    if (!contentPath) return null;
+
+    const updated = await graphOneDriveRequest(contentPath, {
+        method: 'PUT',
+        interactive: false,
+        headers,
+        body: serializeMissionCanonicalDocument(document)
+    });
+
+    return updated;
+}
+
+async function writeOneDriveCanonicalDocument(document = null) {
+    if (!hasOneDriveSyncConfiguration()) return false;
+    if (oneDriveWriteInFlight) return false;
+
+    const snapshot = normalizeMissionCanonicalDocument(document || missionCanonicalDocument || buildMissionCanonicalDocument());
+    oneDriveWriteInFlight = true;
+
+    try {
+        const latestRemoteRecord = await findOneDriveCanonicalItemRecord({ interactive: false });
+        let docToWrite = snapshot;
+        let remoteRecord = latestRemoteRecord || null;
+
+        if (remoteRecord) {
+            const remoteDocument = await parseOneDriveCanonicalDocumentFromRecord(remoteRecord);
+            docToWrite = mergeMissionCanonicalDocuments(remoteDocument, snapshot);
+        }
+
+        docToWrite = {
+            ...docToWrite,
+            revision: Math.max(Number(docToWrite.revision) || 0, Number(snapshot.revision) || 0),
+            updatedAt: nowMissionTimestamp(),
+            updatedBy: getMissionSyncClientId()
+        };
+
+        let updatedRecord = null;
+        if (remoteRecord && remoteRecord.id != null) {
+            try {
+                updatedRecord = await updateOneDriveCanonicalItemRecord(remoteRecord.id, docToWrite, remoteRecord.eTag || remoteRecord['@odata.etag'] || remoteRecord.etag || missionDefaults.oneDriveItemETag || '');
+            } catch (error) {
+                if (error && (error.status === 409 || error.status === 412)) {
+                    const retryRecord = await findOneDriveCanonicalItemRecord({ interactive: false });
+                    if (retryRecord && retryRecord.id != null) {
+                        const retryDocument = await parseOneDriveCanonicalDocumentFromRecord(retryRecord);
+                        docToWrite = mergeMissionCanonicalDocuments(retryDocument, snapshot);
+                        updatedRecord = await updateOneDriveCanonicalItemRecord(retryRecord.id, docToWrite, retryRecord.eTag || retryRecord['@odata.etag'] || retryRecord.etag || '');
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    throw error;
+                }
+            }
+        } else {
+            try {
+                updatedRecord = await createOneDriveCanonicalItemRecord(docToWrite);
+            } catch (error) {
+                if (error && (error.status === 409 || error.status === 412)) {
+                    const retryRecord = await findOneDriveCanonicalItemRecord({ interactive: false });
+                    if (retryRecord && retryRecord.id != null) {
+                        const retryDocument = await parseOneDriveCanonicalDocumentFromRecord(retryRecord);
+                        docToWrite = mergeMissionCanonicalDocuments(retryDocument, snapshot);
+                        updatedRecord = await updateOneDriveCanonicalItemRecord(retryRecord.id, docToWrite, retryRecord.eTag || retryRecord['@odata.etag'] || retryRecord.etag || '');
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    throw error;
+                }
+            }
+        }
+
+        if (!updatedRecord) {
+            const retryRecord = await findOneDriveCanonicalItemRecord({ interactive: false });
+            if (retryRecord && retryRecord.id != null) {
+                updatedRecord = await updateOneDriveCanonicalItemRecord(retryRecord.id, docToWrite, retryRecord.eTag || retryRecord['@odata.etag'] || retryRecord.etag || '');
+            }
+        }
+
+        if (!updatedRecord) {
+            throw new Error('OneDrive file could not be created or updated.');
+        }
+
+        updateOneDriveItemReference(updatedRecord);
+
+        missionCanonicalDocument = {
+            ...docToWrite,
+            missions: docToWrite.missions.map(cloneMissionRecord),
+            missionSyncMetaById: cloneMissionSyncMetaMap(docToWrite.missionSyncMetaById)
+        };
+        missions = missionCanonicalDocument.missions.map(cloneMissionRecord);
+        missionSyncMetaById = cloneMissionSyncMetaMap(missionCanonicalDocument.missionSyncMetaById);
+        storeMissionCanonicalDocumentLocally(missionCanonicalDocument);
+        missionCanonicalLocalDirty = false;
+        updateOneDriveStatusFromState();
+        return true;
+    } catch (error) {
+        console.warn('Failed to write mission data to OneDrive.', error);
+        setOneDriveStatus(graphErrorMessage(error, 'OneDrive write failed.'), 'error');
+        return false;
+    } finally {
+        oneDriveWriteInFlight = false;
+    }
+}
+
+function queueOneDriveFileWrite(document = null) {
+    oneDriveWriteQueue = oneDriveWriteQueue
+        .then(() => writeOneDriveCanonicalDocument(document))
+        .catch(error => {
+            console.warn('OneDrive write queue failed.', error);
+        });
+
+    return oneDriveWriteQueue;
+}
+
+async function syncMissionCanonicalDocumentFromOneDriveFile(options = {}) {
+    const { force = false, initializeIfEmpty = false, interactive = false, skipAccessTokenCheck = false } = options;
+    if (oneDriveReloadInProgress) return null;
+    if (!hasOneDriveSyncConfiguration()) {
+        updateOneDriveStatusFromState();
+        return null;
+    }
+
+    if (!skipAccessTokenCheck) {
+        const accessToken = await getOneDriveAccessToken({ interactive });
+        if (!accessToken) {
+            updateOneDriveStatusFromState();
+            return null;
+        }
+    }
+
+    if (!force && (oneDriveWriteInFlight || missionCanonicalLocalDirty || editingMissionId != null)) {
+        return null;
+    }
+
+    oneDriveReloadInProgress = true;
+    try {
+        const remoteRecord = await findOneDriveCanonicalItemRecord({ interactive });
+        const remoteWasEmpty = Boolean(remoteRecord && remoteRecord.size === 0);
+        const localDocument = missionCanonicalDocument || loadMissionCanonicalDocumentFromCache() || buildMissionCanonicalDocument();
+
+        if (!remoteRecord) {
+            if (initializeIfEmpty) {
+                const initialDocument = localDocument || buildMissionCanonicalDocument();
+                if (initialDocument) {
+                    const initialized = await queueOneDriveFileWrite(initialDocument);
+                    if (initialized) {
+                        applyMissionCanonicalDocumentToRuntime(initialDocument);
+                        updateOneDriveStatusFromState();
+                        return initialDocument;
+                    }
+                }
+            }
+            return null;
+        }
+
+        updateOneDriveItemReference(remoteRecord);
+        const remoteDocument = await parseOneDriveCanonicalDocumentFromRecord(remoteRecord);
+        const mergedDocument = localDocument
+            ? mergeMissionCanonicalDocuments(localDocument, remoteDocument)
+            : remoteDocument;
+
+        applyMissionCanonicalDocumentToRuntime(mergedDocument);
+        renderTimeline();
+        renderMissionCards();
+        if (activeTooltipMissionId != null) {
+            refreshTooltipForMission(activeTooltipMissionId);
+        }
+
+        if (remoteWasEmpty || (localDocument && getComparableMissionCanonicalPayload(mergedDocument) !== getComparableMissionCanonicalPayload(remoteDocument))) {
+            void queueOneDriveFileWrite(mergedDocument);
+        }
+
+        updateOneDriveStatusFromState();
+        return mergedDocument;
+    } catch (error) {
+        console.warn('Failed to sync mission data from OneDrive.', error);
+        setOneDriveStatus(graphErrorMessage(error, 'OneDrive sync failed.'), 'error');
+        return null;
+    } finally {
+        oneDriveReloadInProgress = false;
+    }
+}
+
+async function requestOneDriveConnection() {
+    if (!isOneDriveSyncMode()) {
+        setOneDriveStatus('Switch to OneDrive sync first.');
+        return null;
+    }
+
+    if (!hasOneDriveSyncConfiguration()) {
+        setOneDriveStatus('OneDrive config is incomplete.', 'error');
+        return null;
+    }
+
+    try {
+        setOneDriveStatus('Connecting to OneDrive...');
+        await getOneDriveAccessToken({ interactive: true });
+        const synced = await syncMissionCanonicalDocumentFromOneDriveFile({
+            force: true,
+            initializeIfEmpty: true,
+            interactive: true,
+            skipAccessTokenCheck: true
+        });
+        updateOneDriveStatusFromState();
+        startMissionCanonicalSyncLoop();
+        return synced;
+    } catch (error) {
+        console.warn('OneDrive connection failed.', error);
+        setOneDriveStatus(graphErrorMessage(error, 'OneDrive connection failed.'), 'error');
+        return null;
+    }
+}
+
+async function syncOneDriveNow() {
+    if (!isOneDriveSyncMode()) return null;
+    if (!hasOneDriveSyncConfiguration()) {
+        setOneDriveStatus('OneDrive config is incomplete.', 'error');
+        return null;
+    }
+
+    try {
+        const accessToken = await getOneDriveAccessToken({ interactive: false });
+        if (!accessToken) {
+            updateOneDriveStatusFromState();
+            return null;
+        }
+        const synced = await syncMissionCanonicalDocumentFromOneDriveFile({
+            force: true,
+            initializeIfEmpty: true,
+            skipAccessTokenCheck: true
+        });
+        updateOneDriveStatusFromState();
+        startMissionCanonicalSyncLoop();
+        return synced;
+    } catch (error) {
+        console.warn('OneDrive sync failed.', error);
+        setOneDriveStatus(graphErrorMessage(error, 'OneDrive sync failed.'), 'error');
+        return null;
+    }
+}
+
+function supportsSharePointSyncTransport() {
+    return window.isSecureContext && typeof fetch === 'function' && typeof msal !== 'undefined';
+}
+
+function getSharePointTenantId() {
+    return missionDefaults.sharePointTenantId ? missionDefaults.sharePointTenantId.trim() : '';
+}
+
+function getSharePointClientId() {
+    return missionDefaults.sharePointClientId ? missionDefaults.sharePointClientId.trim() : '';
+}
+
+function getSharePointSiteId() {
+    return missionDefaults.sharePointSiteId ? missionDefaults.sharePointSiteId.trim() : '';
+}
+
+function getSharePointListIdentifier() {
+    return missionDefaults.sharePointListIdentifier ? missionDefaults.sharePointListIdentifier.trim() : '';
+}
+
+function getSharePointItemTitle() {
+    return missionDefaults.sharePointItemTitle ? missionDefaults.sharePointItemTitle.trim() : '';
+}
+
+function getSharePointPayloadField() {
+    return missionDefaults.sharePointPayloadField ? missionDefaults.sharePointPayloadField.trim() : '';
+}
+
+function getSharePointConfigSignature() {
+    return [
+        getSharePointTenantId(),
+        getSharePointClientId(),
+        getSharePointRedirectUri(),
+        getSharePointSiteId(),
+        getSharePointListIdentifier(),
+        getSharePointItemTitle(),
+        getSharePointPayloadField()
+    ].join('|');
+}
+
+function hasSharePointSyncConfiguration() {
+    return Boolean(getSharePointClientId() && getSharePointSiteId() && getSharePointListIdentifier());
+}
+
+function getSharePointAuthority() {
+    const tenantId = getSharePointTenantId();
+    return `https://login.microsoftonline.com/${tenantId || 'common'}`;
+}
+
+function getSharePointRedirectUri() {
+    const configured = missionDefaults.sharePointRedirectUri ? missionDefaults.sharePointRedirectUri.trim() : '';
+    if (configured) return configured;
+    return window.location.href.split('#')[0];
+}
+
+function getSharePointScopes() {
+    return ['Sites.ReadWrite.All'];
+}
+
+function resetSharePointAuthClient() {
+    sharePointAuthClient = null;
+    sharePointAuthConfigSignature = '';
+    sharePointActiveAccount = null;
+}
+
+function getSharePointListResolutionSignature() {
+    return [
+        getSharePointSiteId(),
+        getSharePointListIdentifier()
+    ].join('|');
+}
+
+function buildSharePointListsPath() {
+    const siteId = encodeURIComponent(getSharePointSiteId());
+    return `/sites/${siteId}/lists`;
+}
+
+function buildSharePointListPath(listId) {
+    const siteId = encodeURIComponent(getSharePointSiteId());
+    const encodedListId = encodeURIComponent(String(listId));
+    return `/sites/${siteId}/lists/${encodedListId}`;
+}
+
+function toSharePointGraphRelativePath(nextLink) {
+    if (typeof nextLink !== 'string' || !nextLink.trim()) return '';
+    return nextLink.startsWith(SHAREPOINT_GRAPH_BASE_URL)
+        ? nextLink.slice(SHAREPOINT_GRAPH_BASE_URL.length)
+        : nextLink;
+}
+
+function escapeSharePointODataString(value) {
+    return String(value).replace(/'/g, "''");
+}
+
+async function resolveSharePointListId(options = {}) {
+    const signature = getSharePointListResolutionSignature();
+    if (sharePointResolvedListId && sharePointResolvedListSignature === signature) {
+        return sharePointResolvedListId;
+    }
+
+    const interactive = Boolean(options.interactive);
+    const listIdentifier = getSharePointListIdentifier();
+    if (!listIdentifier) {
+        throw new Error('SharePoint list identifier is required.');
+    }
+
+    try {
+        const directRecord = await graphSharePointRequest(`${buildSharePointListPath(listIdentifier)}?$select=id,displayName`, {
+            interactive
+        });
+        if (!directRecord) {
+            return null;
+        }
+        if (directRecord.id != null) {
+            sharePointResolvedListId = String(directRecord.id);
+            sharePointResolvedListSignature = signature;
+            return sharePointResolvedListId;
+        }
+    } catch (error) {
+        if (!error || error.status !== 404) {
+            throw error;
+        }
+    }
+
+    let nextPath = `${buildSharePointListsPath()}?$select=id,displayName&$top=999`;
+    const normalizedIdentifier = listIdentifier.trim().toLowerCase();
+
+    while (nextPath) {
+        const listing = await graphSharePointRequest(nextPath, { interactive });
+        if (!listing) {
+            return null;
+        }
+        const lists = listing && Array.isArray(listing.value) ? listing.value : [];
+        const match = lists.find(item => {
+            if (!item || item.id == null) return false;
+            if (String(item.id) === listIdentifier) return true;
+            const displayName = typeof item.displayName === 'string' ? item.displayName.trim().toLowerCase() : '';
+            return displayName === normalizedIdentifier;
+        }) || null;
+
+        if (match) {
+            sharePointResolvedListId = String(match.id);
+            sharePointResolvedListSignature = signature;
+            return sharePointResolvedListId;
+        }
+
+        nextPath = listing && typeof listing['@odata.nextLink'] === 'string'
+            ? toSharePointGraphRelativePath(listing['@odata.nextLink'])
+            : '';
+    }
+
+    throw new Error(`SharePoint list "${listIdentifier}" was not found on site ${getSharePointSiteId()}.`);
+}
+
+function updateSharePointItemReference(record) {
+    const itemId = record && record.id != null ? String(record.id) : '';
+    const etag = record && typeof record['@odata.etag'] === 'string'
+        ? record['@odata.etag']
+        : (record && typeof record.etag === 'string' ? record.etag : '');
+
+    let changed = false;
+    if ((missionDefaults.sharePointItemId || '') !== itemId) {
+        missionDefaults.sharePointItemId = itemId;
+        changed = true;
+    }
+    if ((missionDefaults.sharePointItemETag || '') !== etag) {
+        missionDefaults.sharePointItemETag = etag;
+        changed = true;
+    }
+
+    if (changed) {
+        syncMissionDefaultsForm();
+        persistMissionDefaults();
+    }
+}
+
+function clearSharePointItemReference() {
+    let changed = false;
+    if (missionDefaults.sharePointItemId) {
+        missionDefaults.sharePointItemId = '';
+        changed = true;
+    }
+    if (missionDefaults.sharePointItemETag) {
+        missionDefaults.sharePointItemETag = '';
+        changed = true;
+    }
+
+    if (changed) {
+        syncMissionDefaultsForm();
+        persistMissionDefaults();
+    }
+}
+
+function buildSharePointItemFields(document) {
+    const payloadField = getSharePointPayloadField() || SHAREPOINT_DEFAULT_PAYLOAD_FIELD;
+    const fields = {
+        Title: getSharePointItemTitle() || SHAREPOINT_CANONICAL_ITEM_TITLE
+    };
+    fields[payloadField] = serializeMissionCanonicalDocument(document);
+    return fields;
+}
+
+function buildSharePointItemExpandQuery() {
+    const payloadField = getSharePointPayloadField() || SHAREPOINT_DEFAULT_PAYLOAD_FIELD;
+    return `fields($select=Title,${payloadField})`;
+}
+
+async function buildSharePointItemsPath(options = {}) {
+    const siteId = encodeURIComponent(getSharePointSiteId());
+    const resolvedListId = await resolveSharePointListId(options);
+    if (!resolvedListId) return null;
+    const listId = encodeURIComponent(resolvedListId);
+    return `/sites/${siteId}/lists/${listId}/items`;
+}
+
+async function buildSharePointItemPath(itemId, options = {}) {
+    const siteId = encodeURIComponent(getSharePointSiteId());
+    const resolvedListId = await resolveSharePointListId(options);
+    if (!resolvedListId) return null;
+    const listId = encodeURIComponent(resolvedListId);
+    const encodedItemId = encodeURIComponent(String(itemId));
+    return `/sites/${siteId}/lists/${listId}/items/${encodedItemId}`;
+}
+
+async function buildSharePointItemFieldsPath(itemId, options = {}) {
+    const itemPath = await buildSharePointItemPath(itemId, options);
+    return itemPath ? `${itemPath}/fields` : null;
+}
+
+function graphErrorMessage(error, fallback = 'SharePoint request failed.') {
+    if (!error) return fallback;
+    if (error.body && error.body.error && typeof error.body.error.message === 'string') {
+        return error.body.error.message;
+    }
+    if (typeof error.message === 'string' && error.message.trim()) return error.message;
+    return fallback;
+}
+
+async function getSharePointAuthClient() {
+    const signature = getSharePointConfigSignature();
+    if (sharePointAuthClient && sharePointAuthConfigSignature === signature) {
+        return sharePointAuthClient;
+    }
+
+    if (!supportsSharePointSyncTransport()) {
+        throw new Error('SharePoint sync requires Microsoft auth support in a secure browser context.');
+    }
+
+    const clientId = getSharePointClientId();
+    if (!clientId) {
+        throw new Error('SharePoint client ID is required.');
+    }
+
+    sharePointAuthClient = new msal.PublicClientApplication({
+        auth: {
+            clientId,
+            authority: getSharePointAuthority(),
+            redirectUri: getSharePointRedirectUri(),
+            navigateToLoginRequestUrl: false
+        },
+        cache: {
+            cacheLocation: 'localStorage',
+            storeAuthStateInCookie: false
+        }
+    });
+    sharePointAuthConfigSignature = signature;
+    sharePointActiveAccount = sharePointAuthClient.getAllAccounts()[0] || null;
+    return sharePointAuthClient;
+}
+
+async function getSharePointAccessToken(options = {}) {
+    const interactive = Boolean(options.interactive);
+    const client = await getSharePointAuthClient();
+    const scopes = getSharePointScopes();
+    const account = sharePointActiveAccount || client.getAllAccounts()[0] || null;
+
+    if (account) {
+        try {
+            const tokenResult = await client.acquireTokenSilent({
+                scopes,
+                account
+            });
+            sharePointActiveAccount = tokenResult.account || account;
+            return tokenResult.accessToken;
+        } catch (error) {
+            if (!interactive) return null;
+        }
+    }
+
+    if (!interactive) return null;
+
+    const loginResult = await client.loginPopup({
+        scopes,
+        prompt: 'select_account'
+    });
+    sharePointActiveAccount = loginResult.account || null;
+    if (loginResult.accessToken) return loginResult.accessToken;
+
+    const retryResult = await client.acquireTokenSilent({
+        scopes,
+        account: sharePointActiveAccount
+    });
+    return retryResult.accessToken;
+}
+
+async function graphSharePointRequest(path, options = {}) {
+    const token = await getSharePointAccessToken({ interactive: Boolean(options.interactive) });
+    if (!token) return null;
+
+    const headers = new Headers(options.headers || {});
+    headers.set('Authorization', `Bearer ${token}`);
+    if (options.body != null && !headers.has('Content-Type') && options.method && options.method !== 'GET' && options.method !== 'HEAD') {
+        headers.set('Content-Type', 'application/json');
+    }
+
+    const response = await fetch(`${SHAREPOINT_GRAPH_BASE_URL}${path}`, {
+        method: options.method || 'GET',
+        headers,
+        body: options.body,
+        cache: 'no-store'
+    });
+
+    const responseText = await response.text();
+    let responseBody = null;
+    if (responseText) {
+        try {
+            responseBody = JSON.parse(responseText);
+        } catch {
+            responseBody = responseText;
+        }
+    }
+
+    if (!response.ok) {
+        const error = new Error(graphErrorMessage({ body: responseBody, message: response.statusText }, `SharePoint request failed with status ${response.status}.`));
+        error.status = response.status;
+        error.body = responseBody;
+        throw error;
+    }
+
+    if (responseBody == null && response.status === 204) {
+        return {};
+    }
+
+    return responseBody;
+}
+
+async function findSharePointCanonicalItemRecord(options = {}) {
+    const interactive = Boolean(options.interactive);
+    const targetTitle = getSharePointItemTitle() || SHAREPOINT_CANONICAL_ITEM_TITLE;
+    const storedItemId = missionDefaults.sharePointItemId ? missionDefaults.sharePointItemId.trim() : '';
+
+    if (!hasSharePointSyncConfiguration()) return null;
+
+    if (storedItemId) {
+        try {
+            const expandQuery = new URLSearchParams();
+            expandQuery.set('$expand', buildSharePointItemExpandQuery());
+            const itemPath = await buildSharePointItemPath(storedItemId, { interactive });
+            if (!itemPath) return null;
+            const record = await graphSharePointRequest(`${itemPath}?${expandQuery.toString()}`, {
+                interactive
+            });
+            if (record) return record;
+        } catch (error) {
+            if (error && error.status !== 404) {
+                throw error;
+            }
+        }
+    }
+
+    const query = new URLSearchParams();
+    query.set('$expand', buildSharePointItemExpandQuery());
+    query.set('$filter', `fields/Title eq '${escapeSharePointODataString(targetTitle)}'`);
+    query.set('$top', '5');
+
+    const itemsPath = await buildSharePointItemsPath({ interactive });
+    if (!itemsPath) return null;
+    const listing = await graphSharePointRequest(`${itemsPath}?${query.toString()}`, {
+        interactive
+    });
+
+    const items = listing && Array.isArray(listing.value) ? listing.value : [];
+    const byTitle = items.find(item => {
+        const title = item && item.fields && typeof item.fields.Title === 'string' ? item.fields.Title.trim() : '';
+        return title.toLowerCase() === targetTitle.toLowerCase();
+    }) || null;
+    return byTitle;
+}
+
+function parseSharePointCanonicalDocumentFromRecord(record) {
+    const payloadField = getSharePointPayloadField() || SHAREPOINT_DEFAULT_PAYLOAD_FIELD;
+    const fields = record && record.fields && typeof record.fields === 'object' ? record.fields : {};
+    const payload = fields[payloadField];
+    const sourceSignature = `sharepoint:${getSharePointSiteId()}:${sharePointResolvedListId || getSharePointListIdentifier()}:${record && record.id ? String(record.id) : 'unknown'}`;
+
+    if (typeof payload !== 'string' || !payload.trim()) {
+        return normalizeMissionCanonicalDocument({
+            schemaVersion: MISSION_CANONICAL_SCHEMA_VERSION,
+            revision: 0,
+            updatedAt: '',
+            updatedBy: '',
+            missions: [],
+            missionSyncMetaById: Object.create(null)
+        }, {
+            sourceSignature,
+            sourceWasEmpty: true
+        });
+    }
+
+    try {
+        const parsed = JSON.parse(payload);
+        return normalizeMissionCanonicalDocument(parsed, {
+            sourceSignature,
+            sourceLastModified: 0,
+            sourceSize: payload.length,
+            sourceWasEmpty: false
+        });
+    } catch (error) {
+        throw new Error(`SharePoint payload is not valid JSON for item ${record && record.id ? String(record.id) : 'unknown'}.`);
+    }
+}
+
+async function createSharePointCanonicalItemRecord(document) {
+    const itemsPath = await buildSharePointItemsPath();
+    if (!itemsPath) return null;
+    const created = await graphSharePointRequest(itemsPath, {
+        method: 'POST',
+        interactive: false,
+        body: JSON.stringify({
+            fields: buildSharePointItemFields(document)
+        })
+    });
+
+    return created;
+}
+
+async function updateSharePointCanonicalItemRecord(itemId, document, etag = '') {
+    const headers = {};
+    headers['If-Match'] = etag || '*';
+
+    const fieldsPath = await buildSharePointItemFieldsPath(itemId);
+    if (!fieldsPath) return null;
+    const updated = await graphSharePointRequest(fieldsPath, {
+        method: 'PATCH',
+        interactive: false,
+        headers,
+        body: JSON.stringify(buildSharePointItemFields(document))
+    });
+
+    if (updated && Object.keys(updated).length === 0) {
+        return {
+            id: String(itemId),
+            '@odata.etag': etag
+        };
+    }
+
+    return updated;
+}
+
+async function writeSharePointCanonicalDocument(document = null) {
+    if (!hasSharePointSyncConfiguration()) return false;
+    if (sharePointWriteInFlight) return false;
+
+    const snapshot = normalizeMissionCanonicalDocument(document || missionCanonicalDocument || buildMissionCanonicalDocument());
+    sharePointWriteInFlight = true;
+
+    try {
+        const latestRemoteRecord = await findSharePointCanonicalItemRecord({ interactive: false });
+        let docToWrite = snapshot;
+        let remoteRecord = latestRemoteRecord || null;
+
+        if (remoteRecord) {
+            const remoteDocument = parseSharePointCanonicalDocumentFromRecord(remoteRecord);
+            docToWrite = mergeMissionCanonicalDocuments(remoteDocument, snapshot);
+        }
+
+        docToWrite = {
+            ...docToWrite,
+            revision: Math.max(Number(docToWrite.revision) || 0, Number(snapshot.revision) || 0),
+            updatedAt: nowMissionTimestamp(),
+            updatedBy: getMissionSyncClientId()
+        };
+
+        let updatedRecord = null;
+        if (remoteRecord && remoteRecord.id != null) {
+            try {
+                updatedRecord = await updateSharePointCanonicalItemRecord(remoteRecord.id, docToWrite, remoteRecord['@odata.etag'] || remoteRecord.etag || missionDefaults.sharePointItemETag || '');
+            } catch (error) {
+                if (error && (error.status === 409 || error.status === 412)) {
+                    const retryRecord = await findSharePointCanonicalItemRecord({ interactive: false });
+                    if (retryRecord && retryRecord.id != null) {
+                        const retryDocument = parseSharePointCanonicalDocumentFromRecord(retryRecord);
+                        docToWrite = mergeMissionCanonicalDocuments(retryDocument, snapshot);
+                        updatedRecord = await updateSharePointCanonicalItemRecord(retryRecord.id, docToWrite, retryRecord['@odata.etag'] || retryRecord.etag || '');
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    throw error;
+                }
+            }
+        } else {
+            try {
+                updatedRecord = await createSharePointCanonicalItemRecord(docToWrite);
+            } catch (error) {
+                if (error && (error.status === 409 || error.status === 412)) {
+                    const retryRecord = await findSharePointCanonicalItemRecord({ interactive: false });
+                    if (retryRecord && retryRecord.id != null) {
+                        const retryDocument = parseSharePointCanonicalDocumentFromRecord(retryRecord);
+                        docToWrite = mergeMissionCanonicalDocuments(retryDocument, snapshot);
+                        updatedRecord = await updateSharePointCanonicalItemRecord(retryRecord.id, docToWrite, retryRecord['@odata.etag'] || retryRecord.etag || '');
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    throw error;
+                }
+            }
+        }
+
+        if (!updatedRecord) {
+            const retryRecord = await findSharePointCanonicalItemRecord({ interactive: false });
+            if (retryRecord && retryRecord.id != null) {
+                updatedRecord = await updateSharePointCanonicalItemRecord(retryRecord.id, docToWrite, retryRecord['@odata.etag'] || retryRecord.etag || '');
+            }
+        }
+
+        if (!updatedRecord) {
+            throw new Error('SharePoint item could not be created or updated.');
+        }
+
+        updateSharePointItemReference(updatedRecord);
+
+        missionCanonicalDocument = {
+            ...docToWrite,
+            missions: docToWrite.missions.map(cloneMissionRecord),
+            missionSyncMetaById: cloneMissionSyncMetaMap(docToWrite.missionSyncMetaById)
+        };
+        missions = missionCanonicalDocument.missions.map(cloneMissionRecord);
+        missionSyncMetaById = cloneMissionSyncMetaMap(missionCanonicalDocument.missionSyncMetaById);
+        storeMissionCanonicalDocumentLocally(missionCanonicalDocument);
+        missionCanonicalLocalDirty = false;
+        updateSharePointStatusFromState();
+        return true;
+    } catch (error) {
+        console.warn('Failed to write mission data to SharePoint.', error);
+        setSharePointStatus(graphErrorMessage(error, 'SharePoint write failed.'), 'error');
+        return false;
+    } finally {
+        sharePointWriteInFlight = false;
+    }
+}
+
+function queueSharePointListWrite(document = null) {
+    sharePointWriteQueue = sharePointWriteQueue
+        .then(() => writeSharePointCanonicalDocument(document))
+        .catch(error => {
+            console.warn('SharePoint write queue failed.', error);
+        });
+
+    return sharePointWriteQueue;
+}
+
+async function syncMissionCanonicalDocumentFromSharePointList(options = {}) {
+    const { force = false, initializeIfEmpty = false, interactive = false, skipAccessTokenCheck = false } = options;
+    if (sharePointReloadInProgress) return null;
+    if (!hasSharePointSyncConfiguration()) {
+        updateSharePointStatusFromState();
+        return null;
+    }
+
+    if (!skipAccessTokenCheck) {
+        const accessToken = await getSharePointAccessToken({ interactive });
+        if (!accessToken) {
+            updateSharePointStatusFromState();
+            return null;
+        }
+    }
+
+    if (!force && (sharePointWriteInFlight || missionCanonicalLocalDirty || editingMissionId != null)) {
+        return null;
+    }
+
+    sharePointReloadInProgress = true;
+    try {
+        const remoteRecord = await findSharePointCanonicalItemRecord({ interactive });
+        const remoteWasEmpty = Boolean(remoteRecord && remoteRecord.fields && !(remoteRecord.fields[getSharePointPayloadField() || SHAREPOINT_DEFAULT_PAYLOAD_FIELD]));
+        const localDocument = missionCanonicalDocument || loadMissionCanonicalDocumentFromCache() || buildMissionCanonicalDocument();
+
+        if (!remoteRecord) {
+            if (initializeIfEmpty) {
+                const initialDocument = localDocument || buildMissionCanonicalDocument();
+                if (initialDocument) {
+                    const initialized = await queueSharePointListWrite(initialDocument);
+                    if (initialized) {
+                        applyMissionCanonicalDocumentToRuntime(initialDocument);
+                        updateSharePointStatusFromState();
+                        return initialDocument;
+                    }
+                }
+            }
+            return null;
+        }
+
+        updateSharePointItemReference(remoteRecord);
+        const remoteDocument = parseSharePointCanonicalDocumentFromRecord(remoteRecord);
+        const mergedDocument = localDocument
+            ? mergeMissionCanonicalDocuments(localDocument, remoteDocument)
+            : remoteDocument;
+
+        applyMissionCanonicalDocumentToRuntime(mergedDocument);
+        renderTimeline();
+        renderMissionCards();
+        if (activeTooltipMissionId != null) {
+            refreshTooltipForMission(activeTooltipMissionId);
+        }
+
+        if (remoteWasEmpty || (localDocument && getComparableMissionCanonicalPayload(mergedDocument) !== getComparableMissionCanonicalPayload(remoteDocument))) {
+            void queueSharePointListWrite(mergedDocument);
+        }
+
+        updateSharePointStatusFromState();
+        return mergedDocument;
+    } catch (error) {
+        console.warn('Failed to sync mission data from SharePoint.', error);
+        setSharePointStatus(graphErrorMessage(error, 'SharePoint sync failed.'), 'error');
+        return null;
+    } finally {
+        sharePointReloadInProgress = false;
+    }
+}
+
+async function requestSharePointConnection() {
+    if (!isSharePointSyncMode()) {
+        setSharePointStatus('Switch to SharePoint sync first.');
+        return null;
+    }
+
+    if (!hasSharePointSyncConfiguration()) {
+        setSharePointStatus('SharePoint config is incomplete.', 'error');
+        return null;
+    }
+
+    try {
+        setSharePointStatus('Connecting to SharePoint...');
+        await getSharePointAccessToken({ interactive: true });
+        const synced = await syncMissionCanonicalDocumentFromSharePointList({
+            force: true,
+            initializeIfEmpty: true,
+            interactive: true,
+            skipAccessTokenCheck: true
+        });
+        updateSharePointStatusFromState();
+        startMissionCanonicalSyncLoop();
+        return synced;
+    } catch (error) {
+        console.warn('SharePoint connection failed.', error);
+        setSharePointStatus(graphErrorMessage(error, 'SharePoint connection failed.'), 'error');
+        return null;
+    }
+}
+
+async function syncSharePointNow() {
+    if (!isSharePointSyncMode()) return null;
+    if (!hasSharePointSyncConfiguration()) {
+        setSharePointStatus('SharePoint config is incomplete.', 'error');
+        return null;
+    }
+
+    try {
+        const accessToken = await getSharePointAccessToken({ interactive: false });
+        if (!accessToken) {
+            updateSharePointStatusFromState();
+            return null;
+        }
+        const synced = await syncMissionCanonicalDocumentFromSharePointList({
+            force: true,
+            initializeIfEmpty: true,
+            skipAccessTokenCheck: true
+        });
+        updateSharePointStatusFromState();
+        startMissionCanonicalSyncLoop();
+        return synced;
+    } catch (error) {
+        console.warn('SharePoint sync failed.', error);
+        setSharePointStatus(graphErrorMessage(error, 'SharePoint sync failed.'), 'error');
+        return null;
+    }
 }
 
 function normalizeMissionText(value, uppercase = false) {
@@ -332,7 +2572,7 @@ function normalizeMissionText(value, uppercase = false) {
 }
 
 function parseMissionDate(value) {
-    const date = value instanceof Date ? new Date(value) : new Date(value);
+    const date = new Date(value);
     return Number.isNaN(date.getTime()) ? new Date(NaN) : date;
 }
 
@@ -351,7 +2591,10 @@ function normalizeMissionRecord(mission, index = 0) {
     if (!mission || typeof mission !== 'object') return null;
 
     const normalized = { ...mission };
-    normalized.id = mission.id != null ? mission.id : (Date.now() + index);
+    const missionId = mission.id != null && String(mission.id).trim() !== ''
+        ? String(mission.id)
+        : createMissionId();
+    normalized.id = missionId;
     normalized.missionNum = normalizeMissionText(mission.missionNum, true);
     normalized.tailNum = normalizeMissionText(mission.tailNum);
     normalized.pilot = normalizeMissionText(mission.pilot);
@@ -371,25 +2614,23 @@ function normalizeMissionRecord(mission, index = 0) {
 
 function loadMissions() {
     try {
-        const raw = localStorage.getItem(MISSIONS_STORAGE_KEY);
-        if (raw === null) return null;
+        const cachedDocument = loadMissionCanonicalDocumentFromCache();
+        if (!cachedDocument) return null;
 
-        try {
-            const parsed = JSON.parse(raw);
-            if (!Array.isArray(parsed)) return [];
-            return parsed.map((mission, index) => normalizeMissionRecord(mission, index)).filter(Boolean);
-        } catch {
-            return [];
-        }
+        applyMissionCanonicalDocumentToRuntime(cachedDocument, { persistLocalCache: false });
+        return missions;
     } catch {
         return null;
     }
 }
 
 function persistMissions() {
+    const document = buildMissionCanonicalDocument();
+    applyMissionCanonicalDocumentToRuntime(document, { persistLocalCache: true });
+    missionCanonicalLocalDirty = true;
+
     try {
-        localStorage.setItem(MISSIONS_STORAGE_KEY, JSON.stringify(missions));
-        void queueMissionDataDiskWrite();
+        void queueMissionCanonicalDocumentWrite(document);
     } catch {
         // Ignore storage failures in file:// or restricted browser contexts.
     }
@@ -397,6 +2638,339 @@ function persistMissions() {
 
 function normalizeIcao(code) {
     return (code || '').trim().toUpperCase();
+}
+
+function normalizeAirportExactKey(value) {
+    return (value == null ? '' : String(value))
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+}
+
+function normalizeAirportSearchText(value) {
+    return (value == null ? '' : String(value))
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' ');
+}
+
+function addAirportExactLookupKey(index, key, airport) {
+    const normalizedKey = normalizeAirportExactKey(key);
+    if (!normalizedKey) return;
+
+    if (!index.has(normalizedKey)) {
+        index.set(normalizedKey, []);
+    }
+
+    index.get(normalizedKey).push(airport);
+}
+
+function getAirportLookupContext(airport) {
+    const parts = [];
+    const municipality = normalizeMissionText(airport && airport.municipality);
+    const isoRegion = normalizeMissionText(airport && airport.isoRegion);
+    const isoCountry = normalizeMissionText(airport && airport.isoCountry);
+
+    if (municipality) {
+        parts.push(municipality);
+    }
+
+    if (isoRegion) {
+        const regionParts = isoRegion.split('-');
+        const region = regionParts[regionParts.length - 1] || isoRegion;
+        if (region && !parts.includes(region)) {
+            parts.push(region);
+        }
+    }
+
+    if (isoCountry && isoCountry !== 'US') {
+        parts.push(isoCountry);
+    }
+
+    return parts.join(', ');
+}
+
+function getAirportLookupLabel(airport) {
+    const ident = airport && airport.ident ? airport.ident : '';
+    const name = airport && airport.name ? airport.name : 'Unnamed airport';
+    return `${ident} - ${name}`;
+}
+
+function getAirportRecordFromValue(value) {
+    const trimmed = normalizeMissionText(value);
+    if (!trimmed) return null;
+
+    const exactCode = airportData[normalizeIcao(trimmed)];
+    if (exactCode) return exactCode;
+
+    const exactMatches = getAirportExactMatches(trimmed);
+    if (exactMatches.length === 1) {
+        return exactMatches[0];
+    }
+
+    return null;
+}
+
+function getAirportExactMatches(value) {
+    const key = normalizeAirportExactKey(value);
+    if (!key) return [];
+    return airportExactLookupIndex.get(key) || [];
+}
+
+function getAirportLookupSuggestions(value, limit = 6) {
+    const query = normalizeAirportSearchText(value);
+    if (!query || query.length < 2 || airportLookupEntries.length === 0) return [];
+
+    const exactMatches = getAirportExactMatches(value);
+    if (exactMatches.length > 1) {
+        return exactMatches.slice(0, limit);
+    }
+
+    const queryTokens = query.split(' ').filter(Boolean);
+    const ranked = [];
+
+    airportLookupEntries.forEach(airport => {
+        const searchText = airport.searchText || '';
+        if (!searchText) return;
+
+        let score = null;
+
+        if (searchText === query) {
+            score = 1;
+        } else if (searchText.startsWith(query)) {
+            score = 2;
+        } else if (searchText.includes(query)) {
+            score = 3 + (searchText.indexOf(query) / 1000);
+        } else {
+            const hitCount = queryTokens.reduce((count, token) => count + (searchText.includes(token) ? 1 : 0), 0);
+            if (hitCount === 0) return;
+            score = 4 + ((queryTokens.length - hitCount) / queryTokens.length);
+        }
+
+        ranked.push({ airport, score });
+    });
+
+    ranked.sort((left, right) => (
+        left.score - right.score
+        || (left.airport.name || '').localeCompare(right.airport.name || '')
+        || (left.airport.ident || '').localeCompare(right.airport.ident || '')
+    ));
+
+    return ranked.slice(0, limit).map(item => item.airport);
+}
+
+function getAirportFieldResolution(value) {
+    const trimmed = normalizeMissionText(value);
+    if (!trimmed) {
+        return { status: 'empty', value: '' };
+    }
+
+    const codeLike = /^[A-Za-z0-9]{4}$/.test(trimmed);
+    if (codeLike) {
+        return {
+            status: 'code',
+            value: normalizeIcao(trimmed)
+        };
+    }
+
+    const suggestions = getAirportLookupSuggestions(trimmed);
+    if (suggestions.length > 0) {
+        return {
+            status: 'suggestions',
+            suggestions
+        };
+    }
+
+    return {
+        status: 'unresolved',
+        value: trimmed
+    };
+}
+
+function resolveAirportCode(value) {
+    const code = normalizeIcao(value);
+    return /^[A-Z0-9]{4}$/.test(code) ? code : '';
+}
+
+function formatAirportLookupOption(airport) {
+    const main = getAirportLookupLabel(airport);
+    const context = getAirportLookupContext(airport);
+    return {
+        main,
+        context
+    };
+}
+
+function getAirportLookupPanel(input) {
+    if (!input) return null;
+    const field = input.closest('.leg-airport-field');
+    if (!field) return null;
+    return field.querySelector('.airport-lookup-panel');
+}
+
+function hideAirportLookupPanel(input) {
+    const panel = getAirportLookupPanel(input);
+    if (!panel) return;
+
+    panel.hidden = true;
+    panel.innerHTML = '';
+    if (input) {
+        if (input._airportLookupTimer) {
+            clearTimeout(input._airportLookupTimer);
+            input._airportLookupTimer = null;
+        }
+        input._airportLookupRequestToken = (input._airportLookupRequestToken || 0) + 1;
+        input._airportLookupSuggestions = [];
+        input.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function selectAirportLookupOption(input, airport) {
+    if (!input || !airport) return;
+
+    input.value = airport.ident || '';
+    hideAirportLookupPanel(input);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus({ preventScroll: true });
+}
+
+function renderAirportLookupPanel(input, suggestions) {
+    const panel = getAirportLookupPanel(input);
+    if (!panel) return;
+
+    input._airportLookupSuggestions = suggestions;
+    input.setAttribute('aria-expanded', 'true');
+
+    if (!suggestions.length) {
+        panel.innerHTML = '<div class="airport-lookup-empty">No airport matches found.</div>';
+        panel.hidden = false;
+        return;
+    }
+
+    panel.innerHTML = suggestions.map((airport, index) => {
+        const option = formatAirportLookupOption(airport);
+        const contextHtml = option.context
+            ? `<span class="airport-lookup-option-meta">${escapeHtml(option.context)}</span>`
+            : '';
+        return `
+            <button type="button" class="airport-lookup-option" role="option" data-airport-index="${index}">
+                <span class="airport-lookup-option-main">${escapeHtml(option.main)}</span>
+                ${contextHtml}
+            </button>
+        `;
+    }).join('');
+
+    panel.hidden = false;
+
+    panel.querySelectorAll('.airport-lookup-option').forEach(button => {
+        const index = Number(button.getAttribute('data-airport-index'));
+        const airport = suggestions[index];
+        if (!airport) return;
+
+        button.addEventListener('pointerdown', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            selectAirportLookupOption(input, airport);
+        });
+
+        button.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            event.stopPropagation();
+            selectAirportLookupOption(input, airport);
+        });
+    });
+}
+
+async function updateAirportLookupPanel(input, requestToken = 0) {
+    const rawValue = normalizeMissionText(input.value);
+    const panel = getAirportLookupPanel(input);
+    if (!panel) return;
+
+    if (!rawValue) {
+        hideAirportLookupPanel(input);
+        return;
+    }
+
+    if (/^[A-Za-z0-9]{4}$/.test(rawValue)) {
+        hideAirportLookupPanel(input);
+        return;
+    }
+
+    if (airportLookupEntries.length === 0) {
+        panel.innerHTML = '<div class="airport-lookup-empty">Loading airport data...</div>';
+        panel.hidden = false;
+        input.setAttribute('aria-expanded', 'true');
+        input._airportLookupSuggestions = [];
+
+        try {
+            await loadAirportData();
+        } catch {
+            // Fall through and let the unresolved state handle the empty cache.
+        }
+
+        if (requestToken && input._airportLookupRequestToken !== requestToken) return;
+        if (normalizeMissionText(input.value) !== rawValue) return;
+
+        if (airportLookupEntries.length === 0) {
+            panel.innerHTML = '<div class="airport-lookup-empty">Airport lookup unavailable.</div>';
+            panel.hidden = false;
+            input.setAttribute('aria-expanded', 'true');
+            return;
+        }
+    }
+
+    const suggestions = getAirportLookupSuggestions(rawValue);
+    renderAirportLookupPanel(input, suggestions);
+}
+
+function scheduleAirportLookupPanelUpdate(input) {
+    if (!input) return;
+
+    if (input._airportLookupTimer) {
+        clearTimeout(input._airportLookupTimer);
+    }
+
+    input._airportLookupRequestToken = (input._airportLookupRequestToken || 0) + 1;
+    const requestToken = input._airportLookupRequestToken;
+    input._airportLookupTimer = window.setTimeout(() => {
+        input._airportLookupTimer = null;
+        void updateAirportLookupPanel(input, requestToken);
+    }, 120);
+}
+
+function attachAirportLookupBehavior(input) {
+    if (!input || input._airportLookupAttached) return;
+
+    input._airportLookupAttached = true;
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('spellcheck', 'false');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-haspopup', 'listbox');
+    input.setAttribute('aria-expanded', 'false');
+
+    input.addEventListener('input', () => {
+        scheduleAirportLookupPanelUpdate(input);
+    });
+
+    input.addEventListener('focus', () => {
+        scheduleAirportLookupPanelUpdate(input);
+    });
+
+    input.addEventListener('blur', () => {
+        window.setTimeout(() => hideAirportLookupPanel(input), 0);
+    });
+
+    input.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            hideAirportLookupPanel(input);
+            return;
+        }
+    });
 }
 
 function escapeHtml(text) {
@@ -467,9 +3041,10 @@ function formatLocalMilitaryTime(date) {
 }
 
 function getAirportDisplayName(code) {
-    const airport = airportData[normalizeIcao(code)];
+    const normalizedCode = normalizeIcao(code);
+    const airport = /^[A-Z0-9]{4}$/.test(normalizedCode) ? airportData[normalizedCode] : null;
     if (airport && airport.name) return airport.name;
-    return normalizeIcao(code) || 'TBD';
+    return normalizeMissionText(code) || 'TBD';
 }
 
 function getTooltipLegText(leg, index) {
@@ -673,17 +3248,24 @@ function syncCurrentTimeIndicator() {
 
         applyCurrentTimeBubbleStyles(bubble);
         bubble.style.left = `${nowPct}%`;
-        const zuluLine = document.createElement('span');
-        zuluLine.className = 'current-time-bubble-line current-time-bubble-utc';
+
+        let zuluLine = bubble.querySelector('.current-time-bubble-utc');
+        let localLine = bubble.querySelector('.current-time-bubble-local');
+
+        if (!zuluLine) {
+            zuluLine = document.createElement('span');
+            zuluLine.className = 'current-time-bubble-line current-time-bubble-utc';
+            bubble.appendChild(zuluLine);
+        }
+
+        if (!localLine) {
+            localLine = document.createElement('span');
+            localLine.className = 'current-time-bubble-line current-time-bubble-local';
+            bubble.appendChild(localLine);
+        }
+
         zuluLine.textContent = formatZuluTime(now);
-
-        const localLine = document.createElement('span');
-        localLine.className = 'current-time-bubble-line current-time-bubble-local';
         localLine.textContent = formatLocalMilitaryTime(now);
-
-        bubble.textContent = '';
-        bubble.appendChild(zuluLine);
-        bubble.appendChild(localLine);
     }
 }
 
@@ -744,12 +3326,20 @@ function loadAirportData() {
             const latIndex = headers.indexOf('latitude_deg');
             const lonIndex = headers.indexOf('longitude_deg');
             const nameIndex = headers.indexOf('name');
+            const municipalityIndex = headers.indexOf('municipality');
+            const isoRegionIndex = headers.indexOf('iso_region');
+            const isoCountryIndex = headers.indexOf('iso_country');
+            const iataCodeIndex = headers.indexOf('iata_code');
+            const localCodeIndex = headers.indexOf('local_code');
+            const typeIndex = headers.indexOf('type');
 
             if (identIndex === -1 || latIndex === -1 || lonIndex === -1) {
                 throw new Error('Airport CSV missing expected columns.');
             }
 
             const nextAirportData = {};
+            const nextAirportLookupEntries = [];
+            const nextAirportExactLookupIndex = new Map();
 
             for (let i = 1; i < lines.length; i++) {
                 const cols = parseCsvLine(lines[i]);
@@ -757,13 +3347,54 @@ function loadAirportData() {
                 const lat = parseFloat(cols[latIndex]);
                 const lon = parseFloat(cols[lonIndex]);
                 const name = nameIndex !== -1 ? (cols[nameIndex] || '').trim() : '';
+                const municipality = municipalityIndex !== -1 ? (cols[municipalityIndex] || '').trim() : '';
+                const isoRegion = isoRegionIndex !== -1 ? (cols[isoRegionIndex] || '').trim() : '';
+                const isoCountry = isoCountryIndex !== -1 ? (cols[isoCountryIndex] || '').trim() : '';
+                const iataCode = iataCodeIndex !== -1 ? normalizeIcao(cols[iataCodeIndex]) : '';
+                const localCode = localCodeIndex !== -1 ? normalizeIcao(cols[localCodeIndex]) : '';
+                const type = typeIndex !== -1 ? (cols[typeIndex] || '').trim() : '';
 
                 if (ident && Number.isFinite(lat) && Number.isFinite(lon)) {
-                    nextAirportData[ident] = { lat, lon, name };
+                    const airport = {
+                        ident,
+                        lat,
+                        lon,
+                        name,
+                        municipality,
+                        isoRegion,
+                        isoCountry,
+                        iataCode,
+                        localCode,
+                        type
+                    };
+
+                    airport.nameExactKey = normalizeAirportExactKey(name);
+                    airport.searchText = normalizeAirportSearchText([
+                        ident,
+                        name,
+                        municipality,
+                        isoRegion,
+                        isoCountry,
+                        iataCode,
+                        localCode,
+                        type
+                    ].filter(Boolean).join(' '));
+                    airport.lookupLabel = getAirportLookupLabel(airport);
+                    airport.lookupContext = getAirportLookupContext(airport);
+
+                    nextAirportData[ident] = airport;
+                    nextAirportLookupEntries.push(airport);
+
+                    addAirportExactLookupKey(nextAirportExactLookupIndex, ident, airport);
+                    addAirportExactLookupKey(nextAirportExactLookupIndex, name, airport);
+                    addAirportExactLookupKey(nextAirportExactLookupIndex, iataCode, airport);
+                    addAirportExactLookupKey(nextAirportExactLookupIndex, localCode, airport);
                 }
             }
 
             airportData = nextAirportData;
+            airportLookupEntries = nextAirportLookupEntries;
+            airportExactLookupIndex = nextAirportExactLookupIndex;
             return airportData;
         })
         .catch(error => {
@@ -813,8 +3444,8 @@ function getMissionRouteCodes(mission) {
     const codes = [];
 
     legs.forEach(leg => {
-        const takeoff = normalizeIcao(leg.takeoffIcao);
-        const landing = normalizeIcao(leg.landIcao);
+        const takeoff = resolveAirportCode(leg.takeoffIcao) || normalizeIcao(leg.takeoffIcao);
+        const landing = resolveAirportCode(leg.landIcao) || normalizeIcao(leg.landIcao);
 
         if (takeoff && codes[codes.length - 1] !== takeoff) codes.push(takeoff);
         if (landing && codes[codes.length - 1] !== landing) codes.push(landing);
@@ -1131,14 +3762,14 @@ function applyMissionDataInPlace(target, missionData) {
     Object.assign(target, { id, ...missionData });
 }
 
-function buildMissionDataFromForm() {
+function readMissionDataFromForm() {
     const legNodes = document.querySelectorAll('.leg-container');
     let legs = [];
     let timeValid = true;
 
     legNodes.forEach(node => {
-        const tkIcao = node.querySelector('.leg-tk-icao').value.trim().toUpperCase();
-        const ldIcao = node.querySelector('.leg-ld-icao').value.trim().toUpperCase();
+        const tkIcao = normalizeMissionText(node.querySelector('.leg-tk-icao').value);
+        const ldIcao = normalizeMissionText(node.querySelector('.leg-ld-icao').value);
         const tkTime = parseDateTimeLocalValue(node.querySelector('.leg-tk-time').value);
         const ldTime = parseDateTimeLocalValue(node.querySelector('.leg-ld-time').value);
 
@@ -1150,6 +3781,86 @@ function buildMissionDataFromForm() {
             landTime: ldTime || new Date(NaN)
         });
     });
+
+    return {
+        hasLegs: legNodes.length > 0,
+        timeValid,
+        missionData: {
+            missionNum: document.getElementById('missionNum').value.toUpperCase(),
+            tailNum: normalizeMissionText(document.getElementById('tailNum').value),
+            pilot: document.getElementById('pilot').value,
+            copilot: document.getElementById('copilot').value,
+            crewChief: document.getElementById('crewChief').value,
+            loadmaster: document.getElementById('loadmaster').value,
+            liftCustomer: document.getElementById('liftCustomer').value,
+            liftPax: document.getElementById('liftPax').value,
+            liftCargo: document.getElementById('liftCargo').value,
+            liftHazmat: document.getElementById('liftHazmat').value,
+            legs
+        }
+    };
+}
+
+async function buildMissionDataFromForm() {
+    await loadAirportData().catch(() => {});
+
+    const legNodes = document.querySelectorAll('.leg-container');
+    let legs = [];
+    let timeValid = true;
+    let airportIssue = null;
+
+    legNodes.forEach(node => {
+        const tkInput = node.querySelector('.leg-tk-icao');
+        const ldInput = node.querySelector('.leg-ld-icao');
+        const tkTimeInput = node.querySelector('.leg-tk-time');
+        const ldTimeInput = node.querySelector('.leg-ld-time');
+
+        const tkText = normalizeMissionText(tkInput.value);
+        const ldText = normalizeMissionText(ldInput.value);
+        const tkCodeLike = /^[A-Za-z0-9]{4}$/.test(tkText);
+        const ldCodeLike = /^[A-Za-z0-9]{4}$/.test(ldText);
+        const tkSuggestions = tkCodeLike ? [] : getAirportLookupSuggestions(tkText);
+        const ldSuggestions = ldCodeLike ? [] : getAirportLookupSuggestions(ldText);
+
+        if (!tkCodeLike && !airportIssue) {
+            airportIssue = {
+                input: tkInput,
+                label: 'Origin',
+                suggestions: tkSuggestions
+            };
+        }
+
+        if (!ldCodeLike && !airportIssue) {
+            airportIssue = {
+                input: ldInput,
+                label: 'Destination',
+                suggestions: ldSuggestions
+            };
+        }
+
+        const tkTime = parseDateTimeLocalValue(tkTimeInput.value);
+        const ldTime = parseDateTimeLocalValue(ldTimeInput.value);
+
+        if (!tkTime || !ldTime || ldTime <= tkTime) timeValid = false;
+
+        if (!airportIssue) {
+            legs.push({
+                takeoffIcao: normalizeIcao(tkText),
+                takeoffTime: tkTime || new Date(NaN),
+                landIcao: normalizeIcao(ldText),
+                landTime: ldTime || new Date(NaN)
+            });
+        }
+    });
+
+    if (airportIssue) {
+        return {
+            hasLegs: legNodes.length > 0,
+            timeValid,
+            airportIssue,
+            missionData: null
+        };
+    }
 
     return {
         hasLegs: legNodes.length > 0,
@@ -1187,7 +3898,7 @@ function syncEditingMissionPreview() {
     const mission = getEditingMissionRecord();
     if (!mission) return;
 
-    const snapshot = buildMissionDataFromForm();
+    const snapshot = readMissionDataFromForm();
     if (!snapshot.timeValid) return;
 
     applyMissionDataInPlace(mission, snapshot.missionData);
@@ -1349,11 +4060,22 @@ function activateTab(panelId) {
     }
 }
 
+function updateTimelineTip() {
+    const tip = document.getElementById('timeline-tip');
+    if (!tip) return;
+    const isTouch = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+    tip.innerHTML = isTouch
+        ? '<em>Tip: Pinch to zoom. Swipe to pan. Tap missions to view details.</em>'
+        : '<em>Tip: Scroll to zoom. Drag to pan. Hover over missions to locate details.</em>';
+}
+
 function init() {
     const now = new Date();
     let currentFY = now.getFullYear();
-    if (now.getMonth() >= 9) currentFY += 1; 
+    if (now.getMonth() >= 9) currentFY += 1;
     document.getElementById('fy-input').value = currentFY;
+    updateTimelineTip();
+    attachMissionCanonicalSyncObservers();
 
     missionDefaults = loadMissionDefaults();
     syncMissionDefaultsForm();
@@ -1370,9 +4092,7 @@ function init() {
     if (!currentTimeIndicatorRefreshTimer) {
         currentTimeIndicatorRefreshTimer = window.setInterval(syncCurrentTimeIndicator, 1000);
     }
-    void loadMissionDataHandle().then(handle => {
-        if (handle) void queueMissionDataDiskWrite();
-    });
+    activateMissionSyncBackend();
     void loadAirportData().catch(() => {});
 }
 
@@ -1448,7 +4168,7 @@ viewport.addEventListener('wheel', (e) => {
     viewEnd = anchorTime + ((1 - mousePct) * newDuration);
 
     renderTimeline();
-});
+}, { passive: false });
 
 let isDragging = false, lastX = 0;
 viewport.addEventListener('mousedown', (e) => { isDragging = true; lastX = e.clientX; });
@@ -1463,6 +4183,67 @@ window.addEventListener('mousemove', (e) => {
     viewStart -= timeShift; viewEnd -= timeShift;
     renderTimeline();
 });
+
+// Touch pan & pinch-zoom
+function getTouchPinchDist(touches) {
+    return Math.hypot(touches[1].clientX - touches[0].clientX, touches[1].clientY - touches[0].clientY);
+}
+
+viewport.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    touchTapMissionId = activeTooltipMissionId;
+    tooltip.style.display = 'none';
+    clearHoverRouteMap();
+    touchMoved = false;
+    touchActiveCount = e.touches.length;
+
+    if (e.touches.length === 1) {
+        touchPanStartX = e.touches[0].clientX;
+        touchPanStartViewStart = viewStart;
+        touchPanStartViewEnd = viewEnd;
+    } else if (e.touches.length === 2) {
+        const rect = viewport.getBoundingClientRect();
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        touchPinchStartDist = getTouchPinchDist(e.touches);
+        touchPinchStartMidPct = (midX - rect.left) / rect.width;
+        touchPinchStartViewStart = viewStart;
+        touchPinchStartViewEnd = viewEnd;
+    }
+}, { passive: false });
+
+viewport.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    touchMoved = true;
+
+    if (e.touches.length === 1 && touchActiveCount === 1) {
+        const dx = e.touches[0].clientX - touchPanStartX;
+        const rect = viewport.getBoundingClientRect();
+        const msPerPixel = (touchPanStartViewEnd - touchPanStartViewStart) / rect.width;
+        viewStart = touchPanStartViewStart - dx * msPerPixel;
+        viewEnd = touchPanStartViewEnd - dx * msPerPixel;
+        renderTimeline();
+    } else if (e.touches.length === 2 && touchPinchStartDist > 0) {
+        const currentDist = getTouchPinchDist(e.touches);
+        const scale = touchPinchStartDist / currentDist;
+        const baseDuration = touchPinchStartViewEnd - touchPinchStartViewStart;
+        let newDuration = Math.min(Math.max(baseDuration * scale, 3 * MS_PER_DAY), 2 * 365 * MS_PER_DAY);
+        const anchorTime = touchPinchStartViewStart + touchPinchStartMidPct * baseDuration;
+        viewStart = anchorTime - touchPinchStartMidPct * newDuration;
+        viewEnd = anchorTime + (1 - touchPinchStartMidPct) * newDuration;
+        renderTimeline();
+    }
+}, { passive: false });
+
+viewport.addEventListener('touchend', (e) => {
+    touchActiveCount = e.touches.length;
+    if (e.touches.length === 1) {
+        // Dropped from 2 fingers to 1: restart pan tracking
+        touchMoved = false;
+        touchPanStartX = e.touches[0].clientX;
+        touchPanStartViewStart = viewStart;
+        touchPanStartViewEnd = viewEnd;
+    }
+}, { passive: true });
 
 function getMissionTimes(mission) {
     if(!mission.legs || mission.legs.length === 0) return { start: 0, end: 0 };
@@ -1709,18 +4490,19 @@ function renderTimeline() {
             bar.classList.add('past');
         }
 
-        bar.style.left = `${Math.max(0, leftPct)}%`;
-        bar.style.width = leftPct < 0 ? `${widthPct + leftPct}%` : `${widthPct}%`;
-        if(leftPct + widthPct > 100) bar.style.width = `${100 - leftPct}%`;
+        const clampedLeft = Math.max(0, leftPct);
+        const clampedRight = Math.min(100, leftPct + widthPct);
+        bar.style.left = `${clampedLeft}%`;
+        bar.style.width = `${Math.max(0, clampedRight - clampedLeft)}%`;
         
         // Assign top position based on matching tail row
         const tailStr = mission.tailNum ? mission.tailNum.toUpperCase() : 'TBD';
         const tailIndex = uniqueTails.indexOf(tailStr);
         bar.style.top = `${rowOffset + (tailIndex * rowHeight) + 8}px`; 
         
-        const firstIcao = mission.legs[0].takeoffIcao;
-        const lastIcao = mission.legs[mission.legs.length - 1].landIcao;
-            bar.innerHTML = `<span>${mission.missionNum} (${firstIcao}&rarr;${lastIcao})</span>`;
+        const firstIcao = escapeHtml(mission.legs[0].takeoffIcao);
+        const lastIcao = escapeHtml(mission.legs[mission.legs.length - 1].landIcao);
+        bar.innerHTML = `<span>${escapeHtml(mission.missionNum)} (${firstIcao}&rarr;${lastIcao})</span>`;
 
         bar.addEventListener('mouseenter', (e) => {
             showMissionTooltip(mission, e);
@@ -1743,6 +4525,13 @@ function renderTimeline() {
         });
 
         bar.addEventListener('click', () => focusMissionCard(mission.id));
+        bar.addEventListener('touchend', (e) => {
+            if (touchMoved) return;
+            if (touchTapMissionId != null && String(touchTapMissionId) === String(mission.id)) return;
+            const touch = e.changedTouches[0];
+            if (!touch) return;
+            showMissionTooltip(mission, { pageX: touch.pageX, pageY: touch.pageY });
+        });
         missionsContainer.appendChild(bar);
     });
 }
@@ -1762,43 +4551,43 @@ function renderMissionCards() {
         const isComplete = !!(mission.missionNum && mission.tailNum && mission.legs.length > 0 && 
                               mission.pilot && mission.copilot && mission.crewChief && mission.loadmaster);
 
-        if (!hasAnyCrew) card.classList.add('no-crew');
+        if (!isComplete) card.classList.add('no-crew');
         const checkMark = isComplete ? `<span class="status-check">&#10003;</span>` : '';
 
         let legsHTML = mission.legs.map((leg, idx) => `
-                <li><strong>Leg ${idx+1}:</strong> ${leg.takeoffIcao} (${leg.takeoffTime.toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}) &rarr;
-                ${leg.landIcao} (${leg.landTime.toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})})</li>
+                <li><strong>Leg ${idx+1}:</strong> ${escapeHtml(leg.takeoffIcao)} (${leg.takeoffTime.toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}) &rarr;
+                ${escapeHtml(leg.landIcao)} (${leg.landTime.toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})})</li>
         `).join('');
 
         card.innerHTML = `
             <div class="card-col col-mission">
                 <div class="mission-header">
-                    <h3>${checkMark} Mission: ${mission.missionNum}</h3>
+                    <h3>${checkMark} Mission: ${escapeHtml(mission.missionNum)}</h3>
                 </div>
                 <div class="mission-details">
-                    <p class="mission-tail-line"><strong>Tail #:</strong> ${mission.tailNum || '<em>TBD</em>'}</p>
+                    <p class="mission-tail-line"><strong>Tail #:</strong> ${mission.tailNum ? escapeHtml(mission.tailNum) : '<em>TBD</em>'}</p>
                     <ul class="itinerary-list">${legsHTML}</ul>
                     <span class="edit-hint">Click card anywhere to edit</span>
                 </div>
             </div>
-            
+
             <div class="card-col col-crew">
                 <div class="crew-section">
                     <h4>Crew</h4>
-                    <p><strong>Pilot:</strong> ${mission.pilot || '<em>TBD</em>'}</p>
-                    <p><strong>Co-Pilot:</strong> ${mission.copilot || '<em>TBD</em>'}</p>
-                    <p><strong>Crew Chief:</strong> ${mission.crewChief || '<em>TBD</em>'}</p>
-                    <p><strong>Loadmaster(s):</strong> ${mission.loadmaster || '<em>TBD</em>'}</p>
+                    <p><strong>Pilot:</strong> ${mission.pilot ? escapeHtml(mission.pilot) : '<em>TBD</em>'}</p>
+                    <p><strong>Co-Pilot:</strong> ${mission.copilot ? escapeHtml(mission.copilot) : '<em>TBD</em>'}</p>
+                    <p><strong>Crew Chief:</strong> ${mission.crewChief ? escapeHtml(mission.crewChief) : '<em>TBD</em>'}</p>
+                    <p><strong>Loadmaster(s):</strong> ${mission.loadmaster ? escapeHtml(mission.loadmaster) : '<em>TBD</em>'}</p>
                 </div>
             </div>
-            
+
             <div class="card-col col-lift">
                 <div class="lift-section">
                     <h4>Lift</h4>
-                    <p><strong>Customer:</strong> ${mission.liftCustomer || '0'}</p>
-                    <p><strong>Pax:</strong> ${mission.liftPax || '0'}</p>
-                    <p><strong>Cargo:</strong> ${mission.liftCargo || '<em>None</em>'}</p>
-                    <p><strong>Hazmat:</strong> ${mission.liftHazmat || '<em>None</em>'}</p>
+                    <p><strong>Customer:</strong> ${mission.liftCustomer ? escapeHtml(mission.liftCustomer) : '0'}</p>
+                    <p><strong>Pax:</strong> ${mission.liftPax ? escapeHtml(String(mission.liftPax)) : '0'}</p>
+                    <p><strong>Cargo:</strong> ${mission.liftCargo ? escapeHtml(mission.liftCargo) : '<em>None</em>'}</p>
+                    <p><strong>Hazmat:</strong> ${mission.liftHazmat ? escapeHtml(mission.liftHazmat) : '<em>None</em>'}</p>
                 </div>
             </div>
             
@@ -1860,6 +4649,7 @@ function focusMissionCard(id) {
 function deleteMission(id, event) {
     event.stopPropagation();
     if(confirm("Are you sure you want to delete this mission?")) {
+        markMissionDeleted(id);
         missions = missions.filter(m => m.id !== id);
         persistMissions();
         renderTimeline();
@@ -1877,11 +4667,11 @@ document.getElementById('csv-file-input').addEventListener('change', function(e)
         const lines = text.split('\n').filter(l => l.trim() !== '');
         if(lines.length < 2) return alert("CSV is empty or missing data.");
         
-        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        const headers = parseCsvLine(lines[0]).map(h => h.trim().toLowerCase());
         const missionMap = new Map();
 
         for(let i=1; i<lines.length; i++) {
-            const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+            const cols = parseCsvLine(lines[i]).map(c => c.trim());
             let row = {};
             headers.forEach((h, idx) => row[h] = cols[idx]);
             
@@ -1890,7 +4680,7 @@ document.getElementById('csv-file-input').addEventListener('change', function(e)
 
             if(!missionMap.has(mNum)) {
                 missionMap.set(mNum, {
-                    id: Date.now() + i,
+                    id: createMissionId('csv'),
                     missionNum: mNum.toUpperCase(),
                     tailNum: row.tail || '',
                     pilot: row.pilot || '',
@@ -1918,7 +4708,10 @@ document.getElementById('csv-file-input').addEventListener('change', function(e)
             if(m.legs.length > 0) {
                 m.legs.sort((a,b) => a.takeoffTime - b.takeoffTime);
                 const normalizedMission = normalizeMissionRecord(m);
-                if (normalizedMission) missions.push(normalizedMission);
+                if (normalizedMission) {
+                    missions.push(normalizedMission);
+                    markMissionUpdated(normalizedMission.id);
+                }
             }
         });
         
@@ -1936,17 +4729,80 @@ missionDefaultsForm.addEventListener('submit', function(e) {
     e.preventDefault();
     missionDefaults = readMissionDefaultsForm();
     persistMissionDefaults();
+    syncMissionDefaultsForm();
+    activateMissionSyncBackend();
 });
 
 missionDefaultsForm.addEventListener('input', event => {
     if (event.target === missionDataPathInput && !missionDataFileHandleDisabled) {
         void clearStoredMissionDataHandle();
     }
+    const oneDriveConfigInputs = [
+        missionOneDriveTenantIdInput,
+        missionOneDriveClientIdInput,
+        missionOneDriveFilePathInput,
+        missionOneDriveRedirectUriInput
+    ];
+    const oneDriveAuthInputs = [
+        missionOneDriveTenantIdInput,
+        missionOneDriveClientIdInput,
+        missionOneDriveRedirectUriInput
+    ];
+    const sharePointConfigInputs = [
+        missionSharePointTenantIdInput,
+        missionSharePointClientIdInput,
+        missionSharePointSiteIdInput,
+        missionSharePointListIdentifierInput,
+        missionSharePointItemTitleInput,
+        missionSharePointPayloadFieldInput,
+        missionSharePointRedirectUriInput
+    ];
+    const sharePointAuthInputs = [
+        missionSharePointTenantIdInput,
+        missionSharePointClientIdInput,
+        missionSharePointRedirectUriInput
+    ];
+    const wasBackendChange = event.target === missionSyncBackendInput;
+    const wasOneDriveConfigChange = oneDriveConfigInputs.includes(event.target);
+    const wasOneDriveAuthChange = oneDriveAuthInputs.includes(event.target);
+    const wasSharePointConfigChange = sharePointConfigInputs.includes(event.target);
+    const wasSharePointAuthChange = sharePointAuthInputs.includes(event.target);
+
     missionDefaults = readMissionDefaultsForm();
+
+    if (wasOneDriveConfigChange && event.target !== missionOneDriveItemIdInput && event.target !== missionOneDriveItemETagInput) {
+        if (wasOneDriveAuthChange) {
+            resetOneDriveAuthClient();
+        }
+        clearOneDriveItemReference();
+    }
+
+    if (wasSharePointConfigChange && event.target !== missionSharePointItemIdInput && event.target !== missionSharePointItemETagInput) {
+        if (wasSharePointAuthChange) {
+            resetSharePointAuthClient();
+        }
+        clearSharePointItemReference();
+    }
+
     persistMissionDefaults();
+    syncMissionDefaultsForm();
 
     if (event.target === missionTailNumbersInput) {
         syncTailNumberSelect(document.getElementById('tailNum')?.value || '');
+    }
+
+    if (wasBackendChange) {
+        activateMissionSyncBackend();
+    } else if (wasOneDriveConfigChange) {
+        updateOneDriveStatusFromState();
+        if (isOneDriveSyncMode() && hasOneDriveSyncConfiguration()) {
+            startMissionCanonicalSyncLoop();
+        }
+    } else if (wasSharePointConfigChange) {
+        updateSharePointStatusFromState();
+        if (isSharePointSyncMode() && hasSharePointSyncConfiguration()) {
+            startMissionCanonicalSyncLoop();
+        }
     }
 });
 
@@ -1955,11 +4811,31 @@ document.getElementById('btn-clear-defaults').addEventListener('click', () => {
     persistMissionDefaults();
     syncMissionDefaultsForm();
     syncTailNumberSelect('');
+    resetOneDriveAuthClient();
+    clearOneDriveItemReference();
+    resetSharePointAuthClient();
+    clearSharePointItemReference();
     void clearStoredMissionDataHandle();
 });
 
 document.getElementById('btn-choose-mission-data-file').addEventListener('click', () => {
     void requestMissionDataHandle();
+});
+
+sharePointConnectButton?.addEventListener('click', () => {
+    void requestSharePointConnection();
+});
+
+sharePointSyncNowButton?.addEventListener('click', () => {
+    void syncSharePointNow();
+});
+
+oneDriveConnectButton?.addEventListener('click', () => {
+    void requestOneDriveConnection();
+});
+
+oneDriveSyncNowButton?.addEventListener('click', () => {
+    void syncOneDriveNow();
 });
 
 function toDateTimeLocal(date) {
@@ -2102,9 +4978,17 @@ function addLegRow(legData = null) {
     const defaultLegData = legData || getNextLegDefaults();
     div.innerHTML = `
         <div class="form-row leg-row">
-            <div class="form-col leg-col-short"><label class="leg-label">Origin</label><input type="text" class="leg-tk-icao" required maxlength="4" value="${defaultLegData.takeoffIcao || ''}"></div>
+            <div class="form-col leg-col-short leg-airport-field">
+                <label class="leg-label">Origin</label>
+                <input type="text" class="leg-tk-icao" required value="${escapeHtml(defaultLegData.takeoffIcao || '')}" aria-autocomplete="list" aria-expanded="false">
+                <div class="airport-lookup-panel" role="listbox" hidden></div>
+            </div>
             <div class="form-col leg-col-wide"><label class="leg-label">Takeoff Time</label><input type="datetime-local" class="leg-tk-time" required value="${toDateTimeLocal(defaultLegData.takeoffTime)}"></div>
-            <div class="form-col leg-col-short"><label class="leg-label">Destination</label><input type="text" class="leg-ld-icao" required maxlength="4" value="${defaultLegData.landIcao || ''}"></div>
+            <div class="form-col leg-col-short leg-airport-field">
+                <label class="leg-label">Destination</label>
+                <input type="text" class="leg-ld-icao" required value="${escapeHtml(defaultLegData.landIcao || '')}" aria-autocomplete="list" aria-expanded="false">
+                <div class="airport-lookup-panel" role="listbox" hidden></div>
+            </div>
             <div class="form-col leg-col-wide"><label class="leg-label">Land Time</label><input type="datetime-local" class="leg-ld-time" required value="${toDateTimeLocal(defaultLegData.landTime)}"></div>
             <div><button type="button" class="btn btn-remove-leg leg-remove-btn" title="Remove Leg">&times;</button></div>
         </div>
@@ -2119,7 +5003,13 @@ function addLegRow(legData = null) {
         takeoffTimeInput.addEventListener('input', updateLandTime);
         takeoffTimeInput.addEventListener('change', updateLandTime);
     }
+    const takeoffIcaoInput = div.querySelector('.leg-tk-icao');
+    const landIcaoInput = div.querySelector('.leg-ld-icao');
+    attachAirportLookupBehavior(takeoffIcaoInput);
+    attachAirportLookupBehavior(landIcaoInput);
     legsWrapper.appendChild(div);
+    if (takeoffIcaoInput) scheduleAirportLookupPanelUpdate(takeoffIcaoInput);
+    if (landIcaoInput) scheduleAirportLookupPanelUpdate(landIcaoInput);
     if (!legData) syncEditingMissionPreview();
 }
 
@@ -2195,11 +5085,25 @@ function openEditModal(mission) {
     modal.style.display = "block";
 }
 
-missionForm.addEventListener('submit', function(e) {
+missionForm.addEventListener('submit', async function(e) {
     e.preventDefault();
-    const { hasLegs, timeValid, missionData } = buildMissionDataFromForm();
+    const { hasLegs, timeValid, missionData, airportIssue } = await buildMissionDataFromForm();
     if (!hasLegs) return alert("You must add at least one flight leg.");
     if (!timeValid) return alert("Landing time must be after takeoff time for all legs.");
+    if (!missionData) {
+        if (airportIssue && airportIssue.input) {
+            renderAirportLookupPanel(airportIssue.input, airportIssue.suggestions || []);
+            airportIssue.input.focus({ preventScroll: true });
+        }
+        if (airportIssue) {
+            alert(
+                airportIssue.suggestions && airportIssue.suggestions.length > 0
+                    ? `Select an airport from the ${airportIssue.label.toLowerCase()} matches before submitting.`
+                    : `No airport matches found for the ${airportIssue.label.toLowerCase()} field.`
+            );
+        }
+        return;
+    }
     missionData.legs.sort((a, b) => a.takeoffTime - b.takeoffTime);
 
     const tailNum = normalizeMissionText(missionData.tailNum);
@@ -2214,11 +5118,17 @@ missionForm.addEventListener('submit', function(e) {
         const index = missions.findIndex(m => m.id == editId);
         if (index > -1) {
             const normalizedMission = normalizeMissionRecord({ id: missions[index].id, ...missionData });
-            if (normalizedMission) applyMissionDataInPlace(missions[index], normalizedMission);
+            if (normalizedMission) {
+                applyMissionDataInPlace(missions[index], normalizedMission);
+                markMissionUpdated(missions[index].id);
+            }
         }
     } else {
-        const normalizedMission = normalizeMissionRecord({ id: Date.now(), ...missionData });
-        if (normalizedMission) missions.push(normalizedMission);
+        const normalizedMission = normalizeMissionRecord({ id: createMissionId(), ...missionData });
+        if (normalizedMission) {
+            missions.push(normalizedMission);
+            markMissionUpdated(normalizedMission.id);
+        }
     }
 
     persistMissions();
@@ -2236,7 +5146,7 @@ function addDummyData() {
     const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
 
     missions.push({
-        id: 1, missionNum: 'CNV4469', tailNum: '695',
+        id: createMissionId('demo'), missionNum: 'CNV4469', tailNum: '695',
         legs: [
             { takeoffIcao: 'KNUW', takeoffTime: new Date(y, m, d - 2, 8, 0), landIcao: 'KNZY', landTime: new Date(y, m, d - 2, 14, 0) },
             { takeoffIcao: 'KNZY', takeoffTime: new Date(y, m, d - 1, 10, 0), landIcao: 'KNUW', landTime: new Date(y, m, d - 1, 19, 0) }
@@ -2244,15 +5154,17 @@ function addDummyData() {
         pilot: 'John', copilot: 'Bhil', crewChief: 'Smeal', loadmaster: 'Valentine',
         liftCustomer: "DEVGRU", liftPax: 30, liftCargo: '3000', liftHazmat: 'None'
     });
+    markMissionUpdated(missions[missions.length - 1].id);
 
     missions.push({
-        id: 2, missionNum: 'CNV4869', tailNum: '834',
+        id: createMissionId('demo'), missionNum: 'CNV4869', tailNum: '834',
         legs: [
             { takeoffIcao: 'ETAR', takeoffTime: new Date(y, m, d + 2, 10, 0), landIcao: 'KADW', landTime: new Date(y, m, d + 2, 20, 0) }
         ],
         pilot: '', copilot: '', crewChief: '', loadmaster: '',
         liftPax: 91, liftCargo: '500', liftHazmat: 'Yes'
     });
+    markMissionUpdated(missions[missions.length - 1].id);
 
     persistMissions();
 }
