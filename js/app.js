@@ -385,6 +385,41 @@ function parseMissionTimestampMs(value) {
     return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
+function buildComparableMissionViewRecord(mission) {
+    return {
+        id: String(mission.id),
+        missionNum: mission.missionNum || '',
+        tailNum: mission.tailNum || '',
+        pilot: mission.pilot || '',
+        copilot: mission.copilot || '',
+        crewChief: mission.crewChief || '',
+        loadmaster: mission.loadmaster || '',
+        liftCustomer: mission.liftCustomer || '',
+        liftPax: mission.liftPax || '',
+        liftCargo: mission.liftCargo || '',
+        liftHazmat: mission.liftHazmat || '',
+        legs: Array.isArray(mission.legs)
+            ? mission.legs.map(leg => ({
+                takeoffIcao: leg.takeoffIcao || '',
+                takeoffTime: getDateTimestamp(leg.takeoffTime),
+                landIcao: leg.landIcao || '',
+                landTime: getDateTimestamp(leg.landTime)
+            }))
+            : []
+    };
+}
+
+function getComparableMissionViewState(document) {
+    const normalized = normalizeMissionCanonicalDocument(document);
+    const stateById = Object.create(null);
+
+    normalized.missions.forEach(mission => {
+        stateById[String(mission.id)] = JSON.stringify(buildComparableMissionViewRecord(mission));
+    });
+
+    return stateById;
+}
+
 function getMissionSyncMeta(id) {
     const key = String(id);
     return normalizeMissionSyncMeta(missionSyncMetaById[key]);
@@ -542,31 +577,45 @@ function getComparableMissionCanonicalPayload(document) {
 
 function getComparableMissionViewPayload(document) {
     const normalized = normalizeMissionCanonicalDocument(document);
-    return JSON.stringify(normalized.missions.map(mission => ({
-        id: String(mission.id),
-        missionNum: mission.missionNum || '',
-        tailNum: mission.tailNum || '',
-        pilot: mission.pilot || '',
-        copilot: mission.copilot || '',
-        crewChief: mission.crewChief || '',
-        loadmaster: mission.loadmaster || '',
-        liftCustomer: mission.liftCustomer || '',
-        liftPax: mission.liftPax || '',
-        liftCargo: mission.liftCargo || '',
-        liftHazmat: mission.liftHazmat || '',
-        legs: Array.isArray(mission.legs)
-            ? mission.legs.map(leg => ({
-                takeoffIcao: leg.takeoffIcao || '',
-                takeoffTime: getDateTimestamp(leg.takeoffTime),
-                landIcao: leg.landIcao || '',
-                landTime: getDateTimestamp(leg.landTime)
-            }))
-            : []
-    })));
+    return JSON.stringify(normalized.missions.map(buildComparableMissionViewRecord));
+}
+
+function getMissionSyncAnimationState(previousDocument, nextDocument) {
+    const previousViewState = getComparableMissionViewState(previousDocument);
+    const nextViewState = getComparableMissionViewState(nextDocument);
+    const previousIds = new Set(Object.keys(previousViewState));
+    const nextIds = new Set(Object.keys(nextViewState));
+    const addedMissionIds = [];
+    const removedMissionIds = [];
+    const changedMissionIds = [];
+
+    nextIds.forEach(id => {
+        if (!previousIds.has(id)) {
+            addedMissionIds.push(id);
+            return;
+        }
+
+        if (previousViewState[id] !== nextViewState[id]) {
+            changedMissionIds.push(id);
+        }
+    });
+
+    previousIds.forEach(id => {
+        if (!nextIds.has(id)) {
+            removedMissionIds.push(id);
+        }
+    });
+
+    return {
+        shouldAnimateRefresh: addedMissionIds.length > 0 || removedMissionIds.length > 0 || changedMissionIds.length > 0,
+        addedMissionIds,
+        removedMissionIds,
+        changedMissionIds
+    };
 }
 
 function shouldAnimateMissionSyncRefresh(previousDocument, nextDocument) {
-    return getComparableMissionViewPayload(previousDocument) !== getComparableMissionViewPayload(nextDocument);
+    return getMissionSyncAnimationState(previousDocument, nextDocument).shouldAnimateRefresh;
 }
 
 function storeMissionCanonicalDocumentLocally(document) {
@@ -773,9 +822,9 @@ async function syncMissionCanonicalDocumentFromHandle(options = {}) {
             ? mergeMissionCanonicalDocuments(localDocument, remoteDocument)
             : remoteDocument;
 
-        const shouldAnimateRefresh = shouldAnimateMissionSyncRefresh(missionCanonicalDocument, mergedDocument);
+        const syncAnimationState = getMissionSyncAnimationState(localDocument, mergedDocument);
         applyMissionCanonicalDocumentToRuntime(mergedDocument);
-        renderMissionViewsAfterSync(shouldAnimateRefresh);
+        renderMissionViewsAfterSync(syncAnimationState);
 
         if (remoteWasEmpty || (localDocument && getComparableMissionCanonicalPayload(mergedDocument) !== getComparableMissionCanonicalPayload(remoteDocument))) {
             void queueMissionDataDiskWrite(mergedDocument);
@@ -1984,9 +2033,9 @@ async function syncMissionCanonicalDocumentFromOneDriveFile(options = {}) {
             ? mergeMissionCanonicalDocuments(localDocument, remoteDocument)
             : remoteDocument;
 
-        const shouldAnimateRefresh = shouldAnimateMissionSyncRefresh(missionCanonicalDocument, mergedDocument);
+        const syncAnimationState = getMissionSyncAnimationState(localDocument, mergedDocument);
         applyMissionCanonicalDocumentToRuntime(mergedDocument);
-        renderMissionViewsAfterSync(shouldAnimateRefresh);
+        renderMissionViewsAfterSync(syncAnimationState);
 
         if (remoteWasEmpty || (localDocument && getComparableMissionCanonicalPayload(mergedDocument) !== getComparableMissionCanonicalPayload(remoteDocument))) {
             void queueOneDriveFileWrite(mergedDocument);
@@ -2652,9 +2701,9 @@ async function syncMissionCanonicalDocumentFromGoogleCloudFile(options = {}) {
             ? mergeMissionCanonicalDocuments(localDocument, remoteDocument)
             : remoteDocument;
 
-        const shouldAnimateRefresh = shouldAnimateMissionSyncRefresh(missionCanonicalDocument, mergedDocument);
+        const syncAnimationState = getMissionSyncAnimationState(localDocument, mergedDocument);
         applyMissionCanonicalDocumentToRuntime(mergedDocument);
-        renderMissionViewsAfterSync(shouldAnimateRefresh);
+        renderMissionViewsAfterSync(syncAnimationState);
 
         if (remoteWasEmpty || (localDocument && getComparableMissionCanonicalPayload(mergedDocument) !== getComparableMissionCanonicalPayload(remoteDocument))) {
             void queueGoogleCloudFileWrite(mergedDocument);
@@ -3339,9 +3388,9 @@ async function syncMissionCanonicalDocumentFromSharePointList(options = {}) {
             ? mergeMissionCanonicalDocuments(localDocument, remoteDocument)
             : remoteDocument;
 
-        const shouldAnimateRefresh = shouldAnimateMissionSyncRefresh(missionCanonicalDocument, mergedDocument);
+        const syncAnimationState = getMissionSyncAnimationState(localDocument, mergedDocument);
         applyMissionCanonicalDocumentToRuntime(mergedDocument);
-        renderMissionViewsAfterSync(shouldAnimateRefresh);
+        renderMissionViewsAfterSync(syncAnimationState);
 
         if (remoteWasEmpty || (localDocument && getComparableMissionCanonicalPayload(mergedDocument) !== getComparableMissionCanonicalPayload(remoteDocument))) {
             void queueSharePointListWrite(mergedDocument);
@@ -6072,25 +6121,62 @@ function animateDeletedMission(id) {
     createMissionRemovalGhost(document.getElementById(`timeline-${id}`), viewport, 'absolute', 'mission-timeline-delete-animating');
 }
 
-function animateSyncedMissionViews() {
+function animateSyncedMissionViews(missionIds = null) {
+    const resolvedMissionIds = missionIds == null ? null : Array.from(missionIds, id => String(id)).filter(Boolean);
     window.requestAnimationFrame(() => {
-        document.querySelectorAll('.mission-card').forEach(card => {
+        const cards = resolvedMissionIds
+            ? resolvedMissionIds.map(id => document.getElementById(`card-${id}`)).filter(Boolean)
+            : document.querySelectorAll('.mission-card');
+        cards.forEach(card => {
             animateMissionEntryElement(card, 'mission-card-sync-animating');
         });
 
-        document.querySelectorAll('.timeline-bar').forEach(bar => {
+        const bars = resolvedMissionIds
+            ? resolvedMissionIds.map(id => document.getElementById(`timeline-${id}`)).filter(Boolean)
+            : document.querySelectorAll('.timeline-bar');
+        bars.forEach(bar => {
             animateMissionEntryElement(bar, 'mission-timeline-sync-animating');
         });
     });
 }
 
-function renderMissionViewsAfterSync(animateRefresh = false) {
+function renderMissionViewsAfterSync(animationState = false) {
+    const normalizedState = typeof animationState === 'boolean'
+        ? {
+            shouldAnimateRefresh: animationState,
+            addedMissionIds: [],
+            removedMissionIds: [],
+            changedMissionIds: [],
+            animateAllMissionIds: animationState
+        }
+        : {
+            shouldAnimateRefresh: Boolean(animationState && animationState.shouldAnimateRefresh),
+            addedMissionIds: Array.isArray(animationState && animationState.addedMissionIds)
+                ? animationState.addedMissionIds.map(id => String(id))
+                : [],
+            removedMissionIds: Array.isArray(animationState && animationState.removedMissionIds)
+                ? animationState.removedMissionIds.map(id => String(id))
+                : [],
+            changedMissionIds: Array.isArray(animationState && animationState.changedMissionIds)
+                ? animationState.changedMissionIds.map(id => String(id))
+                : [],
+            animateAllMissionIds: Boolean(animationState && animationState.animateAllMissionIds)
+        };
+
+    normalizedState.removedMissionIds.forEach(id => animateDeletedMission(id));
+
     renderTimeline();
     renderMissionCards();
 
-    if (animateRefresh) {
+    if (normalizedState.animateAllMissionIds) {
         animateSyncedMissionViews();
+    } else if (normalizedState.changedMissionIds.length > 0) {
+        animateSyncedMissionViews(normalizedState.changedMissionIds);
     }
+
+    normalizedState.addedMissionIds.forEach(id => {
+        animateAddedMission(id);
+    });
 
     if (activeTooltipMissionId != null) {
         refreshTooltipForMission(activeTooltipMissionId);
