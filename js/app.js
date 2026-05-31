@@ -173,7 +173,7 @@ function createEmptyMissionDefaults() {
         oneDriveItemETag: '',
         googleCloudClientId: '164691062517-j5flaa234p213pdspid9p045jtkh5pp3.apps.googleusercontent.com',
         googleCloudFileName: 'themis_operations_missions.json',
-        googleCloudFolderId: '',
+        googleCloudFolderId: '1RBGAjIzZSBomJwMTNipayG5_2AyAng8F',
         googleCloudFileId: '',
         sharePointTenantId: '',
         sharePointClientId: '',
