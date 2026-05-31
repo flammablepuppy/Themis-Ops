@@ -539,6 +539,35 @@ function getComparableMissionCanonicalPayload(document) {
     });
 }
 
+function getComparableMissionViewPayload(document) {
+    const normalized = normalizeMissionCanonicalDocument(document);
+    return JSON.stringify(normalized.missions.map(mission => ({
+        id: String(mission.id),
+        missionNum: mission.missionNum || '',
+        tailNum: mission.tailNum || '',
+        pilot: mission.pilot || '',
+        copilot: mission.copilot || '',
+        crewChief: mission.crewChief || '',
+        loadmaster: mission.loadmaster || '',
+        liftCustomer: mission.liftCustomer || '',
+        liftPax: mission.liftPax || '',
+        liftCargo: mission.liftCargo || '',
+        liftHazmat: mission.liftHazmat || '',
+        legs: Array.isArray(mission.legs)
+            ? mission.legs.map(leg => ({
+                takeoffIcao: leg.takeoffIcao || '',
+                takeoffTime: getDateTimestamp(leg.takeoffTime),
+                landIcao: leg.landIcao || '',
+                landTime: getDateTimestamp(leg.landTime)
+            }))
+            : []
+    })));
+}
+
+function shouldAnimateMissionSyncRefresh(previousDocument, nextDocument) {
+    return getComparableMissionViewPayload(previousDocument) !== getComparableMissionViewPayload(nextDocument);
+}
+
 function storeMissionCanonicalDocumentLocally(document) {
     try {
         localStorage.setItem(MISSIONS_STORAGE_KEY, serializeMissionCanonicalDocument(document));
@@ -743,12 +772,9 @@ async function syncMissionCanonicalDocumentFromHandle(options = {}) {
             ? mergeMissionCanonicalDocuments(localDocument, remoteDocument)
             : remoteDocument;
 
+        const shouldAnimateRefresh = shouldAnimateMissionSyncRefresh(missionCanonicalDocument, mergedDocument);
         applyMissionCanonicalDocumentToRuntime(mergedDocument);
-        renderTimeline();
-        renderMissionCards();
-        if (activeTooltipMissionId != null) {
-            refreshTooltipForMission(activeTooltipMissionId);
-        }
+        renderMissionViewsAfterSync(shouldAnimateRefresh);
 
         if (remoteWasEmpty || (localDocument && getComparableMissionCanonicalPayload(mergedDocument) !== getComparableMissionCanonicalPayload(remoteDocument))) {
             void queueMissionDataDiskWrite(mergedDocument);
@@ -1957,12 +1983,9 @@ async function syncMissionCanonicalDocumentFromOneDriveFile(options = {}) {
             ? mergeMissionCanonicalDocuments(localDocument, remoteDocument)
             : remoteDocument;
 
+        const shouldAnimateRefresh = shouldAnimateMissionSyncRefresh(missionCanonicalDocument, mergedDocument);
         applyMissionCanonicalDocumentToRuntime(mergedDocument);
-        renderTimeline();
-        renderMissionCards();
-        if (activeTooltipMissionId != null) {
-            refreshTooltipForMission(activeTooltipMissionId);
-        }
+        renderMissionViewsAfterSync(shouldAnimateRefresh);
 
         if (remoteWasEmpty || (localDocument && getComparableMissionCanonicalPayload(mergedDocument) !== getComparableMissionCanonicalPayload(remoteDocument))) {
             void queueOneDriveFileWrite(mergedDocument);
@@ -2628,12 +2651,9 @@ async function syncMissionCanonicalDocumentFromGoogleCloudFile(options = {}) {
             ? mergeMissionCanonicalDocuments(localDocument, remoteDocument)
             : remoteDocument;
 
+        const shouldAnimateRefresh = shouldAnimateMissionSyncRefresh(missionCanonicalDocument, mergedDocument);
         applyMissionCanonicalDocumentToRuntime(mergedDocument);
-        renderTimeline();
-        renderMissionCards();
-        if (activeTooltipMissionId != null) {
-            refreshTooltipForMission(activeTooltipMissionId);
-        }
+        renderMissionViewsAfterSync(shouldAnimateRefresh);
 
         if (remoteWasEmpty || (localDocument && getComparableMissionCanonicalPayload(mergedDocument) !== getComparableMissionCanonicalPayload(remoteDocument))) {
             void queueGoogleCloudFileWrite(mergedDocument);
@@ -3318,12 +3338,9 @@ async function syncMissionCanonicalDocumentFromSharePointList(options = {}) {
             ? mergeMissionCanonicalDocuments(localDocument, remoteDocument)
             : remoteDocument;
 
+        const shouldAnimateRefresh = shouldAnimateMissionSyncRefresh(missionCanonicalDocument, mergedDocument);
         applyMissionCanonicalDocumentToRuntime(mergedDocument);
-        renderTimeline();
-        renderMissionCards();
-        if (activeTooltipMissionId != null) {
-            refreshTooltipForMission(activeTooltipMissionId);
-        }
+        renderMissionViewsAfterSync(shouldAnimateRefresh);
 
         if (remoteWasEmpty || (localDocument && getComparableMissionCanonicalPayload(mergedDocument) !== getComparableMissionCanonicalPayload(remoteDocument))) {
             void queueSharePointListWrite(mergedDocument);
@@ -5998,6 +6015,31 @@ function createMissionRemovalGhost(element, host, positionStrategy, animationCla
 function animateDeletedMission(id) {
     createMissionRemovalGhost(document.getElementById(`card-${id}`), document.body, 'fixed', 'mission-card-delete-animating');
     createMissionRemovalGhost(document.getElementById(`timeline-${id}`), viewport, 'absolute', 'mission-timeline-delete-animating');
+}
+
+function animateSyncedMissionViews() {
+    window.requestAnimationFrame(() => {
+        document.querySelectorAll('.mission-card').forEach(card => {
+            animateMissionEntryElement(card, 'mission-card-sync-animating');
+        });
+
+        document.querySelectorAll('.timeline-bar').forEach(bar => {
+            animateMissionEntryElement(bar, 'mission-timeline-sync-animating');
+        });
+    });
+}
+
+function renderMissionViewsAfterSync(animateRefresh = false) {
+    renderTimeline();
+    renderMissionCards();
+
+    if (animateRefresh) {
+        animateSyncedMissionViews();
+    }
+
+    if (activeTooltipMissionId != null) {
+        refreshTooltipForMission(activeTooltipMissionId);
+    }
 }
 
 function locateMission(id, event) {
