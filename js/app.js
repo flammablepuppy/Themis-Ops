@@ -1955,6 +1955,7 @@ async function writeOneDriveCanonicalDocument(document = null) {
         }
 
         updateOneDriveItemReference(updatedRecord);
+        const syncAnimationState = remoteRecord ? getMissionSyncAnimationState(snapshot, docToWrite) : null;
 
         missionCanonicalDocument = {
             ...docToWrite,
@@ -1965,6 +1966,9 @@ async function writeOneDriveCanonicalDocument(document = null) {
         missionSyncMetaById = cloneMissionSyncMetaMap(missionCanonicalDocument.missionSyncMetaById);
         storeMissionCanonicalDocumentLocally(missionCanonicalDocument);
         missionCanonicalLocalDirty = false;
+        if (syncAnimationState && syncAnimationState.shouldAnimateRefresh) {
+            renderMissionViewsAfterSync(syncAnimationState);
+        }
         updateOneDriveStatusFromState();
         return true;
     } catch (error) {
@@ -2618,6 +2622,7 @@ async function writeGoogleCloudCanonicalDocument(document = null) {
         }
 
         updateGoogleCloudItemReference(updatedRecord);
+        const syncAnimationState = remoteRecord ? getMissionSyncAnimationState(snapshot, docToWrite) : null;
 
         missionCanonicalDocument = {
             ...docToWrite,
@@ -2628,6 +2633,9 @@ async function writeGoogleCloudCanonicalDocument(document = null) {
         missionSyncMetaById = cloneMissionSyncMetaMap(missionCanonicalDocument.missionSyncMetaById);
         storeMissionCanonicalDocumentLocally(missionCanonicalDocument);
         missionCanonicalLocalDirty = false;
+        if (syncAnimationState && syncAnimationState.shouldAnimateRefresh) {
+            renderMissionViewsAfterSync(syncAnimationState);
+        }
         updateGoogleCloudStatusFromState();
         return true;
     } catch (error) {
@@ -3310,6 +3318,7 @@ async function writeSharePointCanonicalDocument(document = null) {
         }
 
         updateSharePointItemReference(updatedRecord);
+        const syncAnimationState = remoteRecord ? getMissionSyncAnimationState(snapshot, docToWrite) : null;
 
         missionCanonicalDocument = {
             ...docToWrite,
@@ -3320,6 +3329,9 @@ async function writeSharePointCanonicalDocument(document = null) {
         missionSyncMetaById = cloneMissionSyncMetaMap(missionCanonicalDocument.missionSyncMetaById);
         storeMissionCanonicalDocumentLocally(missionCanonicalDocument);
         missionCanonicalLocalDirty = false;
+        if (syncAnimationState && syncAnimationState.shouldAnimateRefresh) {
+            renderMissionViewsAfterSync(syncAnimationState);
+        }
         updateSharePointStatusFromState();
         return true;
     } catch (error) {
