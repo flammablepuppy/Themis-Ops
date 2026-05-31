@@ -45,7 +45,7 @@
             </div>
 
             <p class="timeline-tip" id="timeline-tip">
-                <em>Tip: Scroll to zoom. Drag to pan. Hover over missions to locate details. Click Year/Month/Current Time labels to center view.</em>
+                <em>Tip: Scroll to zoom. Drag to pan. Hover over missions to locate details.</em>
             </p>
         </div>
 
@@ -69,6 +69,12 @@
             <form id="mission-defaults-form" class="defaults-form">
                 <div class="form-row">
                     <div class="form-col"><label>Home Field</label><input type="text" id="defaultHomeField"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-col">
+                        <label>Available Tail Numbers</label>
+                        <textarea id="defaultTailNumbers" rows="3" placeholder="695, 834, 877"></textarea>
+                    </div>
                 </div>
                 <div class="form-row">
                     <div class="form-col">
@@ -103,12 +109,6 @@
                             <button type="button" class="btn btn-small" id="btn-googlecloud-connect">Connect</button>
                             <button type="button" class="btn btn-small" id="btn-googlecloud-sync-now">Sync Now</button>
                         </div>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-col">
-                        <label>Available Tail Numbers</label>
-                        <textarea id="defaultTailNumbers" rows="3" placeholder="695, 834, 877"></textarea>
                     </div>
                 </div>
                 <div class="form-row sync-settings-group" id="local-sync-settings" hidden>
@@ -154,10 +154,10 @@
                 <div class="sync-settings-group" id="googlecloud-sync-settings" hidden>
                     <div class="form-row">
                         <div class="form-col"><label>Client ID</label><input type="text" id="defaultGoogleCloudClientId" placeholder="Google Cloud OAuth client ID" value="164691062517-j5flaa234p213pdspid9p045jtkh5pp3.apps.googleusercontent.com "></div>
-                        <div class="form-col"><label>File Name</label><input type="text" id="defaultGoogleCloudFileName" placeholder="themis_operations_missions.json" value="1RBGAjIzZSBomJwMTNipayG5_2AyAng8F"></div>
+                        <div class="form-col"><label>File Name</label><input type="text" id="defaultGoogleCloudFileName" placeholder="themis_operations_missions.json"></div>
                     </div>
                     <div class="form-row">
-                        <div class="form-col"><label>Folder ID (optional)</label><input type="text" id="defaultGoogleCloudFolderId" placeholder="Google Cloud folder ID"></div>
+                        <div class="form-col"><label>Folder ID (optional)</label><input type="text" id="defaultGoogleCloudFolderId" placeholder="Google Cloud folder ID" value="1RBGAjIzZSBomJwMTNipayG5_2AyAng8F"></div>
                     </div>
                     <input type="hidden" id="defaultGoogleCloudFileId">
                 </div>
