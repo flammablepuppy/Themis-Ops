@@ -5396,8 +5396,6 @@ function init() {
     const loadedMissions = loadMissions();
     if (loadedMissions !== null) {
         missions = loadedMissions;
-    } else {
-        //addDummyData();
     }
 
     snapToSevenDayOutlook();
@@ -6489,33 +6487,5 @@ missionForm.addEventListener('submit', async function(e) {
         refreshTooltipForMission(committedMissionId);
     }
 });
-
-function addDummyData() {
-    const now = new Date();
-    const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
-
-    missions.push({
-        id: createMissionId('demo'), missionNum: 'CNV4469', tailNum: '695',
-        legs: [
-            { takeoffIcao: 'KNUW', takeoffTime: new Date(y, m, d - 2, 8, 0), landIcao: 'KNZY', landTime: new Date(y, m, d - 2, 14, 0) },
-            { takeoffIcao: 'KNZY', takeoffTime: new Date(y, m, d - 1, 10, 0), landIcao: 'KNUW', landTime: new Date(y, m, d - 1, 19, 0) }
-        ],
-        pilot: 'John', copilot: 'Bhil', crewChief: 'Smeal', loadmaster: 'Valentine',
-        liftCustomer: "DEVGRU", liftPax: 30, liftCargo: '3000', liftHazmat: 'None'
-    });
-    markMissionUpdated(missions[missions.length - 1].id);
-
-    missions.push({
-        id: createMissionId('demo'), missionNum: 'CNV4869', tailNum: '834',
-        legs: [
-            { takeoffIcao: 'ETAR', takeoffTime: new Date(y, m, d + 2, 10, 0), landIcao: 'KADW', landTime: new Date(y, m, d + 2, 20, 0) }
-        ],
-        pilot: '', copilot: '', crewChief: '', loadmaster: '',
-        liftPax: 91, liftCargo: '500', liftHazmat: 'Yes'
-    });
-    markMissionUpdated(missions[missions.length - 1].id);
-
-    persistMissions();
-}
 
 init();
