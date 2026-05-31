@@ -1100,13 +1100,18 @@ function updateGoogleCloudStatusFromState(message = null, state = 'idle') {
         return;
     }
 
+    if (!getGoogleCloudFolderId()) {
+        setGoogleCloudStatus('Google Cloud shared folder ID required.', 'error');
+        return;
+    }
+
     if (missionDefaults.googleCloudFileId) {
-        setGoogleCloudStatus(`Connected to Google Cloud file ${missionDefaults.googleCloudFileName || missionDefaults.googleCloudFileId}`, 'connected');
+        setGoogleCloudStatus(`Connected to shared Google Cloud file ${missionDefaults.googleCloudFileName || missionDefaults.googleCloudFileId}`, 'connected');
         return;
     }
 
     if (missionDefaults.googleCloudClientId && missionDefaults.googleCloudFileName) {
-        setGoogleCloudStatus('Google Cloud configured, not connected yet');
+        setGoogleCloudStatus('Google Cloud shared file configured, not connected yet');
         return;
     }
 
@@ -2062,7 +2067,7 @@ function getGoogleCloudResolutionSignature() {
 }
 
 function hasGoogleCloudSyncConfiguration() {
-    return Boolean(getGoogleCloudClientId() && getGoogleCloudFileName());
+    return Boolean(getGoogleCloudClientId() && getGoogleCloudFileName() && getGoogleCloudFolderId());
 }
 
 function getGoogleCloudScopes() {
@@ -2346,10 +2351,12 @@ async function findGoogleCloudCanonicalItemRecord(options = {}) {
     const interactive = Boolean(options.interactive);
     const targetName = getGoogleCloudFileName();
     const normalizedTargetName = targetName.trim().toLowerCase();
+    const folderId = getGoogleCloudFolderId();
     const storedFileId = missionDefaults.googleCloudFileId ? missionDefaults.googleCloudFileId.trim() : '';
     const resolutionSignature = getGoogleCloudResolutionSignature();
 
     if (!hasGoogleCloudSyncConfiguration()) return null;
+    if (!folderId) return null;
 
     if (storedFileId) {
         try {
@@ -2455,6 +2462,9 @@ async function parseGoogleCloudCanonicalDocumentFromRecord(record) {
 
 async function createGoogleCloudCanonicalItemRecord(document) {
     const folderId = getGoogleCloudFolderId();
+    if (!folderId) {
+        throw new Error('Google Cloud shared folder ID is required.');
+    }
     const body = {
         name: getGoogleCloudFileName(),
         mimeType: GOOGLE_CLOUD_CANONICAL_FILE_MIME_TYPE
@@ -2646,7 +2656,7 @@ async function requestGoogleCloudConnection() {
     }
 
     if (!hasGoogleCloudSyncConfiguration()) {
-        setGoogleCloudStatus('Google Cloud config is incomplete.', 'error');
+        setGoogleCloudStatus('Google Cloud shared folder ID required.', 'error');
         return null;
     }
 
@@ -2672,7 +2682,7 @@ async function requestGoogleCloudConnection() {
 async function syncGoogleCloudNow() {
     if (!isGoogleCloudSyncMode()) return null;
     if (!hasGoogleCloudSyncConfiguration()) {
-        setGoogleCloudStatus('Google Cloud config is incomplete.', 'error');
+        setGoogleCloudStatus('Google Cloud shared folder ID required.', 'error');
         return null;
     }
 
