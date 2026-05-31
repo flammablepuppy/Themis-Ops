@@ -293,6 +293,10 @@
             font-size: 0.75rem;
         }
         .leaflet-marker-icon.route-icao-label {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
             font-weight: 800;
             color: #000;
             font-size: 11px;
@@ -328,6 +332,23 @@
         }
         .route-direction-arrow-head {
             fill: #d71920;
+        }
+        .route-leg-number-marker {
+            background: transparent;
+            border: none;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 800;
+            line-height: 1;
+            padding: 0;
+            white-space: nowrap;
+            text-align: center;
+            pointer-events: none;
+            user-select: none;
+            text-shadow: 0 0 2px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.95);
         }
 
     /* Buttons */
@@ -409,20 +430,38 @@
         .leg-container { background: #f9f9f9; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 10px; }
         .mission-tail-line { margin-bottom: 5px; }
         .leg-row { align-items: flex-end; gap: 8px; }
+        .leg-row.airport-name-visible { align-items: flex-start; }
         .leg-col-short { flex: 0.8; }
         .leg-col-wide { flex: 1.5; }
         .leg-label { font-size: 0.8rem; }
-        .leg-airport-field { display: flex; flex-direction: column; min-width: 0; }
+        .leg-airport-field { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: visible; }
         .leg-airport-field input { min-width: 0; }
-        .airport-lookup-panel {
+        .airport-name-display {
             margin-top: 4px;
+            min-height: 1em;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            line-height: 1.25;
+            white-space: nowrap;
+            overflow: visible;
+            overflow-wrap: normal;
+            word-break: normal;
+            max-width: none;
+        }
+        .airport-lookup-panel {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            width: 100%;
+            max-width: 420px;
+            box-sizing: border-box;
             border: 1px solid var(--border-color);
             border-radius: 4px;
             background: #fff;
             box-shadow: 0 6px 16px rgba(0,0,0,0.12);
             max-height: 190px;
             overflow-y: auto;
-            z-index: 10;
+            z-index: 30;
         }
         .airport-lookup-empty {
             padding: 8px 10px;
@@ -448,6 +487,9 @@
         .airport-lookup-option:focus {
             background: #eef5ff;
             outline: none;
+        }
+        .airport-lookup-option.is-active {
+            background: #dce9ff;
         }
         .airport-lookup-option-main {
             display: block;

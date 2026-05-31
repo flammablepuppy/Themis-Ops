@@ -83,9 +83,21 @@ let hoverTooltipPosition = { x: 0, y: 0 };
 let activeTooltipMissionId = null;
 let tooltipMeasureCtx = null;
 let tooltipMeasureFont = '';
-const ROUTE_AIRPORT_DOT_RADIUS_PX = 4;
+let routeLabelMeasureCtx = null;
+let routeLabelMeasureFont = '';
+const ROUTE_AIRPORT_DOT_RADIUS_PX = 7;
 const ROUTE_AIRPORT_DOT_WEIGHT_PX = 1;
 const ROUTE_AIRPORT_DOT_EDGE_PX = ROUTE_AIRPORT_DOT_RADIUS_PX + (ROUTE_AIRPORT_DOT_WEIGHT_PX / 2);
+const ROUTE_ICAO_LABEL_MIN_WIDTH_PX = 30;
+const ROUTE_ICAO_LABEL_HEIGHT_PX = 18;
+const ROUTE_ICAO_LABEL_HORIZONTAL_PADDING_PX = 5;
+const ROUTE_ICAO_LABEL_CLEARANCE_PX = 8;
+const ROUTE_ICAO_LABEL_VERTICAL_GAP_PX = 2;
+const ROUTE_ICAO_LABEL_SEARCH_STEP_PX = 2;
+const ROUTE_ICAO_LABEL_SEARCH_ANGLE_STEP_DEG = 8;
+const ROUTE_ICAO_LABEL_MAX_SEARCH_PX = 48;
+const ROUTE_ICAO_LABEL_LINE_CLEARANCE_PX = 2;
+const ROUTE_DIRECTION_MARKER_SAFE_RADIUS_PX = 6;
 let editingMissionId = null;
 let editingMissionBackup = null;
 let missionDataFileHandle = null;
@@ -3559,8 +3571,7 @@ function getAirportFieldResolution(value) {
         return { status: 'empty', value: '' };
     }
 
-    const codeLike = /^[A-Za-z0-9]{4}$/.test(trimmed);
-    if (codeLike) {
+    if (isValidAirportIcaoCode(trimmed)) {
         return {
             status: 'code',
             value: normalizeIcao(trimmed)
@@ -3586,6 +3597,11 @@ function resolveAirportCode(value) {
     return /^[A-Z0-9]{4}$/.test(code) ? code : '';
 }
 
+function isValidAirportIcaoCode(value) {
+    const code = normalizeIcao(value);
+    return /^[A-Z0-9]{4}$/.test(code) && Boolean(airportData[code]);
+}
+
 function formatAirportLookupOption(airport) {
     const main = getAirportLookupLabel(airport);
     const context = getAirportLookupContext(airport);
@@ -3602,6 +3618,107 @@ function getAirportLookupPanel(input) {
     return field.querySelector('.airport-lookup-panel');
 }
 
+function getAirportNameDisplay(input) {
+    if (!input) return null;
+    const field = input.closest('.leg-airport-field');
+    if (!field) return null;
+    return field.querySelector('.airport-name-display');
+}
+
+function normalizeAirportInputValue(input) {
+    if (!input) return '';
+
+    const rawValue = normalizeMissionText(input.value);
+    if (!isValidAirportIcaoCode(rawValue)) {
+        return rawValue;
+    }
+
+    const normalized = normalizeIcao(rawValue);
+    if (input.value !== normalized) {
+        const selectionStart = input.selectionStart;
+        const selectionEnd = input.selectionEnd;
+        const selectionDirection = input.selectionDirection;
+
+        input.value = normalized;
+
+        if (typeof selectionStart === 'number' && typeof selectionEnd === 'number') {
+            try {
+                input.setSelectionRange(selectionStart, selectionEnd, selectionDirection || 'none');
+            } catch {
+                // Ignore selection restore failures for unsupported browsers.
+            }
+        }
+    }
+
+    return normalized;
+}
+
+function updateAirportNameDisplay(input) {
+    const display = getAirportNameDisplay(input);
+    if (!display) return;
+
+    const rawValue = normalizeAirportInputValue(input);
+    const airport = isValidAirportIcaoCode(rawValue) ? airportData[normalizeIcao(rawValue)] : null;
+    const hasAirportName = Boolean(airport && airport.name);
+
+    if (hasAirportName) {
+        display.textContent = airport.name;
+        display.hidden = false;
+    } else {
+        display.textContent = '';
+        display.hidden = true;
+    }
+
+    const row = input.closest('.leg-row');
+    if (row) {
+        const hasVisibleAirportName = Boolean(row.querySelector('.airport-name-display:not([hidden])'));
+        row.classList.toggle('airport-name-visible', hasVisibleAirportName);
+    }
+}
+
+function getAirportLookupSuggestionsForInput(input) {
+    return input && Array.isArray(input._airportLookupSuggestions) ? input._airportLookupSuggestions : [];
+}
+
+function getAirportLookupActiveIndex(input, suggestions = getAirportLookupSuggestionsForInput(input)) {
+    if (!Array.isArray(suggestions) || suggestions.length === 0) return -1;
+
+    const rawIndex = Number.isInteger(input && input._airportLookupActiveIndex)
+        ? input._airportLookupActiveIndex
+        : 0;
+
+    if (rawIndex < 0) return 0;
+    if (rawIndex >= suggestions.length) return suggestions.length - 1;
+    return rawIndex;
+}
+
+function setAirportLookupActiveIndex(input, index) {
+    if (!input) return;
+
+    const suggestions = getAirportLookupSuggestionsForInput(input);
+    if (suggestions.length === 0) {
+        input._airportLookupActiveIndex = -1;
+        return;
+    }
+
+    const nextIndex = ((index % suggestions.length) + suggestions.length) % suggestions.length;
+    input._airportLookupActiveIndex = nextIndex;
+
+    const panel = getAirportLookupPanel(input);
+    if (panel && !panel.hidden) {
+        renderAirportLookupPanel(input, suggestions);
+    }
+}
+
+function moveAirportLookupSelection(input, delta) {
+    const suggestions = getAirportLookupSuggestionsForInput(input);
+    if (suggestions.length === 0) return;
+
+    const currentIndex = getAirportLookupActiveIndex(input, suggestions);
+    const nextIndex = currentIndex < 0 ? 0 : currentIndex + delta;
+    setAirportLookupActiveIndex(input, nextIndex);
+}
+
 function hideAirportLookupPanel(input) {
     const panel = getAirportLookupPanel(input);
     if (!panel) return;
@@ -3615,7 +3732,9 @@ function hideAirportLookupPanel(input) {
         }
         input._airportLookupRequestToken = (input._airportLookupRequestToken || 0) + 1;
         input._airportLookupSuggestions = [];
+        input._airportLookupActiveIndex = -1;
         input.setAttribute('aria-expanded', 'false');
+        input.removeAttribute('aria-activedescendant');
     }
 }
 
@@ -3624,6 +3743,7 @@ function selectAirportLookupOption(input, airport) {
 
     input.value = airport.ident || '';
     hideAirportLookupPanel(input);
+    updateAirportNameDisplay(input);
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.focus({ preventScroll: true });
 }
@@ -3632,7 +3752,9 @@ function renderAirportLookupPanel(input, suggestions) {
     const panel = getAirportLookupPanel(input);
     if (!panel) return;
 
+    const activeIndex = getAirportLookupActiveIndex(input, suggestions);
     input._airportLookupSuggestions = suggestions;
+    input._airportLookupActiveIndex = activeIndex;
     input.setAttribute('aria-expanded', 'true');
 
     if (!suggestions.length) {
@@ -3647,7 +3769,7 @@ function renderAirportLookupPanel(input, suggestions) {
             ? `<span class="airport-lookup-option-meta">${escapeHtml(option.context)}</span>`
             : '';
         return `
-            <button type="button" class="airport-lookup-option" role="option" data-airport-index="${index}">
+            <button type="button" class="airport-lookup-option${index === activeIndex ? ' is-active' : ''}" role="option" aria-selected="${index === activeIndex ? 'true' : 'false'}" data-airport-index="${index}">
                 <span class="airport-lookup-option-main">${escapeHtml(option.main)}</span>
                 ${contextHtml}
             </button>
@@ -3674,6 +3796,11 @@ function renderAirportLookupPanel(input, suggestions) {
             selectAirportLookupOption(input, airport);
         });
     });
+
+    const activeButton = panel.querySelector('.airport-lookup-option.is-active');
+    if (activeButton && typeof activeButton.scrollIntoView === 'function') {
+        activeButton.scrollIntoView({ block: 'nearest' });
+    }
 }
 
 async function updateAirportLookupPanel(input, requestToken = 0) {
@@ -3683,11 +3810,13 @@ async function updateAirportLookupPanel(input, requestToken = 0) {
 
     if (!rawValue) {
         hideAirportLookupPanel(input);
+        updateAirportNameDisplay(input);
         return;
     }
 
-    if (/^[A-Za-z0-9]{4}$/.test(rawValue)) {
+    if (isValidAirportIcaoCode(rawValue)) {
         hideAirportLookupPanel(input);
+        updateAirportNameDisplay(input);
         return;
     }
 
@@ -3710,12 +3839,20 @@ async function updateAirportLookupPanel(input, requestToken = 0) {
             panel.innerHTML = '<div class="airport-lookup-empty">Airport lookup unavailable.</div>';
             panel.hidden = false;
             input.setAttribute('aria-expanded', 'true');
+            updateAirportNameDisplay(input);
             return;
         }
     }
 
+    if (isValidAirportIcaoCode(rawValue)) {
+        hideAirportLookupPanel(input);
+        updateAirportNameDisplay(input);
+        return;
+    }
+
     const suggestions = getAirportLookupSuggestions(rawValue);
     renderAirportLookupPanel(input, suggestions);
+    updateAirportNameDisplay(input);
 }
 
 function scheduleAirportLookupPanelUpdate(input) {
@@ -3726,6 +3863,7 @@ function scheduleAirportLookupPanelUpdate(input) {
     }
 
     input._airportLookupRequestToken = (input._airportLookupRequestToken || 0) + 1;
+    input._airportLookupActiveIndex = 0;
     const requestToken = input._airportLookupRequestToken;
     input._airportLookupTimer = window.setTimeout(() => {
         input._airportLookupTimer = null;
@@ -3744,10 +3882,12 @@ function attachAirportLookupBehavior(input) {
     input.setAttribute('aria-expanded', 'false');
 
     input.addEventListener('input', () => {
+        updateAirportNameDisplay(input);
         scheduleAirportLookupPanelUpdate(input);
     });
 
     input.addEventListener('focus', () => {
+        updateAirportNameDisplay(input);
         scheduleAirportLookupPanelUpdate(input);
     });
 
@@ -3759,6 +3899,37 @@ function attachAirportLookupBehavior(input) {
         if (event.key === 'Escape') {
             hideAirportLookupPanel(input);
             return;
+        }
+
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter') {
+            const suggestions = getAirportLookupSuggestionsForInput(input);
+            const panel = getAirportLookupPanel(input);
+
+            if (!suggestions.length || !panel || panel.hidden) {
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                    scheduleAirportLookupPanelUpdate(input);
+                    event.preventDefault();
+                }
+                return;
+            }
+
+            event.preventDefault();
+
+            if (event.key === 'ArrowDown') {
+                moveAirportLookupSelection(input, 1);
+                return;
+            }
+
+            if (event.key === 'ArrowUp') {
+                moveAirportLookupSelection(input, -1);
+                return;
+            }
+
+            const activeIndex = getAirportLookupActiveIndex(input, suggestions);
+            const airport = suggestions[activeIndex];
+            if (airport) {
+                selectAirportLookupOption(input, airport);
+            }
         }
     });
 }
@@ -3794,6 +3965,14 @@ function clearMissionCardFocusHighlight() {
 
 function formatTooltipDateTime(date) {
     return date instanceof Date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : 'TBD';
+}
+
+function formatTooltipDateDDMMM(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return 'TBD';
+
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+    return `${day}-${month}`;
 }
 
 function formatZuluTime(date) {
@@ -3838,11 +4017,11 @@ function getAirportDisplayName(code) {
 }
 
 function getTooltipLegText(leg, index) {
-    const takeoffName = getAirportDisplayName(leg.takeoffIcao);
-    const landName = getAirportDisplayName(leg.landIcao);
-    const takeoffTime = formatTooltipDateTime(leg.takeoffTime);
-    const landTime = formatTooltipDateTime(leg.landTime);
-    return `Leg ${index + 1}: ${takeoffName} (${takeoffTime}) → ${landName} (${landTime})`;
+    const takeoffIcao = normalizeMissionText(leg.takeoffIcao, true) || 'TBD';
+    const landIcao = normalizeMissionText(leg.landIcao, true) || 'TBD';
+    const takeoffDate = formatTooltipDateDDMMM(leg.takeoffTime);
+    const landDate = formatTooltipDateDDMMM(leg.landTime);
+    return `Leg ${index + 1}: ${takeoffIcao} (${takeoffDate}) → ${landIcao} (${landDate})`;
 }
 
 function getTooltipMeasureContext() {
@@ -3853,7 +4032,7 @@ function getTooltipMeasureContext() {
     probe.style.position = 'absolute';
     probe.style.visibility = 'hidden';
     probe.style.whiteSpace = 'nowrap';
-    probe.textContent = 'Leg 1: Sample Airport (00/00/0000, 12:00:00 AM) -> Sample Airport (00/00/0000, 12:00:00 AM)';
+    probe.textContent = 'Leg 1: KJFK (01-JAN) → KLAX (02-JAN)';
     document.body.appendChild(probe);
 
     const computedStyle = getComputedStyle(probe);
@@ -3873,6 +4052,46 @@ function measureTooltipTextWidth(text) {
     return ctx.measureText(text).width;
 }
 
+function getRouteLabelMeasureContext() {
+    if (routeLabelMeasureFont && routeLabelMeasureCtx) return routeLabelMeasureCtx;
+
+    const probe = document.createElement('span');
+    probe.className = 'route-icao-label';
+    probe.style.position = 'absolute';
+    probe.style.visibility = 'hidden';
+    probe.style.whiteSpace = 'nowrap';
+    probe.style.left = '-9999px';
+    probe.style.top = '-9999px';
+    probe.textContent = 'KJFK';
+    document.body.appendChild(probe);
+
+    const computedStyle = getComputedStyle(probe);
+    routeLabelMeasureFont = computedStyle.font || `${computedStyle.fontWeight} ${computedStyle.fontSize} ${computedStyle.fontFamily}`;
+    probe.remove();
+
+    if (!routeLabelMeasureCtx) {
+        routeLabelMeasureCtx = document.createElement('canvas').getContext('2d');
+    }
+
+    routeLabelMeasureCtx.font = routeLabelMeasureFont;
+    return routeLabelMeasureCtx;
+}
+
+function measureRouteLabelTextWidth(text) {
+    const ctx = getRouteLabelMeasureContext();
+    return ctx.measureText(text).width;
+}
+
+function getRouteIcaoLabelSize(code) {
+    const text = normalizeMissionText(code) || '';
+    const width = Math.max(ROUTE_ICAO_LABEL_MIN_WIDTH_PX, Math.ceil(measureRouteLabelTextWidth(text)) + (ROUTE_ICAO_LABEL_HORIZONTAL_PADDING_PX * 2));
+
+    return {
+        width,
+        height: ROUTE_ICAO_LABEL_HEIGHT_PX
+    };
+}
+
 function getMissionFlightHours(mission) {
     if (!mission || !Array.isArray(mission.legs) || mission.legs.length === 0) return 0;
 
@@ -3889,7 +4108,7 @@ function getMissionFlightHours(mission) {
 }
 
 function formatMissionFlightHours(mission) {
-    return getMissionFlightHours(mission).toFixed(2);
+    return getMissionFlightHours(mission).toFixed(1);
 }
 
 function setHoverTooltipWidth(mission) {
@@ -3971,7 +4190,7 @@ function snapToThreeDayOutlook() {
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
     const end = new Date(start);
-    end.setDate(end.getDate() + 4);
+    end.setDate(end.getDate() + 2);
     end.setHours(23, 59, 59, 999);
 
     viewStart = start.getTime();
@@ -4266,63 +4485,318 @@ function getRouteSegmentPlacement(map, start, end) {
     };
 }
 
-function getRouteLabelPlacement(map, routePoints, index, offsetPx = 16) {
+function getRouteOffsetPlacement(map, point, offsetX = 0, offsetY = 0) {
+    const layerPoint = map.latLngToLayerPoint(L.latLng(point));
+    return map.layerPointToLatLng(layerPoint.add(L.point(offsetX, offsetY)));
+}
+
+function getRouteLegNumberPlacement(map, end, offsetX = 0, offsetY = 0) {
+    return getRouteOffsetPlacement(map, end, offsetX, offsetY);
+}
+
+function distancePointToSegment(point, segmentStart, segmentEnd) {
+    const delta = segmentEnd.subtract(segmentStart);
+    const lengthSquared = (delta.x * delta.x) + (delta.y * delta.y);
+
+    if (!lengthSquared) {
+        return Math.hypot(point.x - segmentStart.x, point.y - segmentStart.y);
+    }
+
+    const t = Math.max(0, Math.min(1, (((point.x - segmentStart.x) * delta.x) + ((point.y - segmentStart.y) * delta.y)) / lengthSquared));
+    const projection = L.point(segmentStart.x + (delta.x * t), segmentStart.y + (delta.y * t));
+    return Math.hypot(point.x - projection.x, point.y - projection.y);
+}
+
+function distancePointToPoint(pointA, pointB) {
+    return Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
+}
+
+function getRouteLabelSize(labelSize = null) {
+    const width = labelSize && Number.isFinite(labelSize.width) ? labelSize.width : ROUTE_ICAO_LABEL_MIN_WIDTH_PX;
+    const height = labelSize && Number.isFinite(labelSize.height) ? labelSize.height : ROUTE_ICAO_LABEL_HEIGHT_PX;
+
+    return {
+        width,
+        height,
+        halfWidth: width / 2,
+        halfHeight: height / 2
+    };
+}
+
+function getRouteLabelBounds(placementPoint, labelSize = null) {
+    const { width, height, halfWidth, halfHeight } = getRouteLabelSize(labelSize);
+
+    return {
+        left: placementPoint.x - halfWidth,
+        right: placementPoint.x + halfWidth,
+        top: placementPoint.y - halfHeight,
+        bottom: placementPoint.y + halfHeight,
+        width,
+        height
+    };
+}
+
+function pointInRect(point, rect) {
+    return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+}
+
+function rectsOverlap(rectA, rectB) {
+    return rectA.left < rectB.right && rectA.right > rectB.left && rectA.top < rectB.bottom && rectA.bottom > rectB.top;
+}
+
+function rectIntersectsCircle(rect, center, radius) {
+    const closestX = Math.max(rect.left, Math.min(center.x, rect.right));
+    const closestY = Math.max(rect.top, Math.min(center.y, rect.bottom));
+    const dx = center.x - closestX;
+    const dy = center.y - closestY;
+    return ((dx * dx) + (dy * dy)) < (radius * radius);
+}
+
+function distancePointToRect(point, rect) {
+    const dx = point.x < rect.left
+        ? rect.left - point.x
+        : point.x > rect.right
+            ? point.x - rect.right
+            : 0;
+    const dy = point.y < rect.top
+        ? rect.top - point.y
+        : point.y > rect.bottom
+            ? point.y - rect.bottom
+            : 0;
+    return Math.hypot(dx, dy);
+}
+
+function distanceRectToRect(rectA, rectB) {
+    const dx = rectA.right < rectB.left
+        ? rectB.left - rectA.right
+        : rectB.right < rectA.left
+            ? rectA.left - rectB.right
+            : 0;
+    const dy = rectA.bottom < rectB.top
+        ? rectB.top - rectA.bottom
+        : rectB.bottom < rectA.top
+            ? rectA.top - rectB.bottom
+            : 0;
+    return Math.hypot(dx, dy);
+}
+
+function segmentsIntersect(pointA, pointB, pointC, pointD) {
+    const EPSILON = 1e-9;
+
+    function orientation(p, q, r) {
+        const value = ((q.y - p.y) * (r.x - q.x)) - ((q.x - p.x) * (r.y - q.y));
+        if (Math.abs(value) <= EPSILON) return 0;
+        return value > 0 ? 1 : 2;
+    }
+
+    function onSegment(p, q, r) {
+        return q.x >= Math.min(p.x, r.x) - EPSILON &&
+            q.x <= Math.max(p.x, r.x) + EPSILON &&
+            q.y >= Math.min(p.y, r.y) - EPSILON &&
+            q.y <= Math.max(p.y, r.y) + EPSILON;
+    }
+
+    const o1 = orientation(pointA, pointB, pointC);
+    const o2 = orientation(pointA, pointB, pointD);
+    const o3 = orientation(pointC, pointD, pointA);
+    const o4 = orientation(pointC, pointD, pointB);
+
+    if (o1 !== o2 && o3 !== o4) return true;
+    if (o1 === 0 && onSegment(pointA, pointC, pointB)) return true;
+    if (o2 === 0 && onSegment(pointA, pointD, pointB)) return true;
+    if (o3 === 0 && onSegment(pointC, pointA, pointD)) return true;
+    if (o4 === 0 && onSegment(pointC, pointB, pointD)) return true;
+    return false;
+}
+
+function rectIntersectsSegment(rect, startPoint, endPoint) {
+    if (pointInRect(startPoint, rect) || pointInRect(endPoint, rect)) return true;
+
+    const topLeft = L.point(rect.left, rect.top);
+    const topRight = L.point(rect.right, rect.top);
+    const bottomLeft = L.point(rect.left, rect.bottom);
+    const bottomRight = L.point(rect.right, rect.bottom);
+
+    return segmentsIntersect(startPoint, endPoint, topLeft, topRight) ||
+        segmentsIntersect(startPoint, endPoint, topRight, bottomRight) ||
+        segmentsIntersect(startPoint, endPoint, bottomRight, bottomLeft) ||
+        segmentsIntersect(startPoint, endPoint, bottomLeft, topLeft);
+}
+
+function getRouteLabelPlacement(map, routePoints, index, labelSize = null, placedLabelBounds = [], markerPoints = null) {
     const currentPoint = map.latLngToLayerPoint(L.latLng(routePoints[index][0], routePoints[index][1]));
-    const prevRaw = routePoints[index - 1];
-    const nextRaw = routePoints[index + 1];
-    const routeCenterPoint = routePoints.reduce((acc, point) => {
-        const layerPoint = map.latLngToLayerPoint(L.latLng(point[0], point[1]));
-        acc.x += layerPoint.x;
-        acc.y += layerPoint.y;
-        return acc;
-    }, { x: 0, y: 0 });
+    const { halfWidth: labelHalfWidth, halfHeight: labelHalfHeight } = getRouteLabelSize(labelSize);
+    const labelRadius = Math.max(labelHalfWidth, labelHalfHeight);
+    const mapSize = map.getSize ? map.getSize() : null;
+    const segmentPoints = [];
+    const arrowPoints = [];
+    const dotPoints = [];
+    const searchAngles = [];
 
-    routeCenterPoint.x /= routePoints.length;
-    routeCenterPoint.y /= routePoints.length;
+    for (let i = 0; i < routePoints.length - 1; i++) {
+        const startRaw = routePoints[i];
+        const endRaw = routePoints[i + 1];
+        if (startRaw[0] === endRaw[0] && startRaw[1] === endRaw[1]) continue;
 
-    let direction = null;
+        const startPoint = map.latLngToLayerPoint(L.latLng(startRaw[0], startRaw[1]));
+        const endPoint = map.latLngToLayerPoint(L.latLng(endRaw[0], endRaw[1]));
+        segmentPoints.push([startPoint, endPoint]);
+        arrowPoints.push(map.latLngToLayerPoint(getRouteSegmentPlacement(map, startRaw, endRaw).latLng));
+    }
 
-    if (prevRaw && nextRaw) {
-        const prevPoint = map.latLngToLayerPoint(L.latLng(prevRaw[0], prevRaw[1]));
-        const nextPoint = map.latLngToLayerPoint(L.latLng(nextRaw[0], nextRaw[1]));
-        const incoming = currentPoint.subtract(prevPoint);
-        const outgoing = nextPoint.subtract(currentPoint);
-        const incomingLength = Math.hypot(incoming.x, incoming.y);
-        const outgoingLength = Math.hypot(outgoing.x, outgoing.y);
-        const incomingUnit = incomingLength ? incoming.divideBy(incomingLength) : null;
-        const outgoingUnit = outgoingLength ? outgoing.divideBy(outgoingLength) : null;
+    const dotSourcePoints = Array.isArray(markerPoints) && markerPoints.length === routePoints.length ? markerPoints : routePoints;
 
-        if (incomingUnit && outgoingUnit) {
-            direction = incomingUnit.add(outgoingUnit);
-            if (!direction.x && !direction.y) {
-                direction = outgoingUnit;
+    dotSourcePoints.forEach(point => {
+        dotPoints.push(map.latLngToLayerPoint(L.latLng(point)));
+    });
+
+    for (let angleDeg = 0; angleDeg < 360; angleDeg += ROUTE_ICAO_LABEL_SEARCH_ANGLE_STEP_DEG) {
+        const angleRad = angleDeg * Math.PI / 180;
+        const dx = Math.cos(angleRad);
+        const dy = Math.sin(angleRad);
+        searchAngles.push({
+            angleDeg,
+            angleIndex: searchAngles.length,
+            dx,
+            dy,
+            baseOffset: ROUTE_AIRPORT_DOT_EDGE_PX + ROUTE_ICAO_LABEL_VERTICAL_GAP_PX + (Math.abs(dx) * labelHalfWidth) + (Math.abs(dy) * labelHalfHeight)
+        });
+    }
+
+    const minOffset = Math.max(0, searchAngles.reduce((min, entry) => Math.min(min, entry.baseOffset), Number.POSITIVE_INFINITY));
+
+    function scoreCandidate(placementPoint) {
+        const bounds = getRouteLabelBounds(placementPoint, labelSize);
+        const boundsClearance = mapSize
+            ? Math.min(
+                bounds.left,
+                mapSize.x - bounds.right,
+                bounds.top,
+                mapSize.y - bounds.bottom
+            )
+            : Number.POSITIVE_INFINITY;
+
+        let labelClearance = Number.POSITIVE_INFINITY;
+        let dotClearance = Number.POSITIVE_INFINITY;
+        let segmentClearance = Number.POSITIVE_INFINITY;
+        let arrowClearance = Number.POSITIVE_INFINITY;
+        let collisionCount = 0;
+
+        placedLabelBounds.forEach(otherBounds => {
+            if (rectsOverlap(bounds, otherBounds)) collisionCount += 1;
+            labelClearance = Math.min(labelClearance, distanceRectToRect(bounds, otherBounds));
+        });
+
+        dotPoints.forEach(dotPoint => {
+            if (rectIntersectsCircle(bounds, dotPoint, ROUTE_AIRPORT_DOT_EDGE_PX)) collisionCount += 1;
+            dotClearance = Math.min(dotClearance, distancePointToRect(dotPoint, bounds) - ROUTE_AIRPORT_DOT_EDGE_PX);
+        });
+
+        segmentPoints.forEach(([startPoint, endPoint]) => {
+            if (rectIntersectsSegment(bounds, startPoint, endPoint)) collisionCount += 1;
+            segmentClearance = Math.min(
+                segmentClearance,
+                distancePointToSegment(placementPoint, startPoint, endPoint) - labelRadius - ROUTE_ICAO_LABEL_LINE_CLEARANCE_PX
+            );
+        });
+
+        arrowPoints.forEach(arrowPoint => {
+            if (rectIntersectsCircle(bounds, arrowPoint, ROUTE_DIRECTION_MARKER_SAFE_RADIUS_PX)) collisionCount += 1;
+            arrowClearance = Math.min(
+                arrowClearance,
+                distancePointToRect(arrowPoint, bounds) - ROUTE_DIRECTION_MARKER_SAFE_RADIUS_PX
+            );
+        });
+
+        return {
+            placementPoint,
+            bounds,
+            boundsClearance,
+            segmentClearance,
+            labelClearance,
+            dotClearance,
+            arrowClearance,
+            clearance: Math.min(boundsClearance, segmentClearance, labelClearance, dotClearance, arrowClearance),
+            collisionCount
+        };
+    }
+
+    let bestCandidate = null;
+
+    for (let offset = minOffset; offset <= (minOffset + ROUTE_ICAO_LABEL_MAX_SEARCH_PX); offset += ROUTE_ICAO_LABEL_SEARCH_STEP_PX) {
+        let bestClearAtOffset = null;
+        let bestAtOffset = null;
+
+        for (let angleIndex = 0; angleIndex < searchAngles.length; angleIndex++) {
+            const angle = searchAngles[angleIndex];
+            if (offset + 1e-6 < angle.baseOffset) continue;
+
+            const candidate = scoreCandidate(currentPoint.add(L.point(angle.dx * offset, angle.dy * offset)));
+            candidate.angleIndex = angleIndex;
+            candidate.angleDeg = angle.angleDeg;
+            candidate.offset = offset;
+            candidate.sideIndex = angleIndex;
+            candidate.side = `angle-${angle.angleDeg}`;
+
+            if (candidate.collisionCount === 0 && candidate.boundsClearance >= 0) {
+                if (!bestClearAtOffset ||
+                    candidate.clearance > bestClearAtOffset.clearance ||
+                    (candidate.clearance === bestClearAtOffset.clearance && candidate.boundsClearance > bestClearAtOffset.boundsClearance) ||
+                    (candidate.clearance === bestClearAtOffset.clearance && candidate.boundsClearance === bestClearAtOffset.boundsClearance && candidate.angleIndex < bestClearAtOffset.angleIndex)) {
+                    bestClearAtOffset = candidate;
+                }
             }
-        } else {
-            direction = outgoingUnit || incomingUnit;
+
+            if (!bestAtOffset ||
+                candidate.collisionCount < bestAtOffset.collisionCount ||
+                (candidate.collisionCount === bestAtOffset.collisionCount && candidate.clearance > bestAtOffset.clearance) ||
+                (candidate.collisionCount === bestAtOffset.collisionCount && candidate.clearance === bestAtOffset.clearance && candidate.boundsClearance > bestAtOffset.boundsClearance) ||
+                (candidate.collisionCount === bestAtOffset.collisionCount && candidate.clearance === bestAtOffset.clearance && candidate.boundsClearance === bestAtOffset.boundsClearance && candidate.angleIndex < bestAtOffset.angleIndex)) {
+                bestAtOffset = candidate;
+            }
         }
-    } else if (nextRaw) {
-        const nextPoint = map.latLngToLayerPoint(L.latLng(nextRaw[0], nextRaw[1]));
-        direction = nextPoint.subtract(currentPoint);
-    } else if (prevRaw) {
-        const prevPoint = map.latLngToLayerPoint(L.latLng(prevRaw[0], prevRaw[1]));
-        direction = currentPoint.subtract(prevPoint);
+
+        if (bestClearAtOffset) {
+            return {
+                latLng: map.layerPointToLatLng(bestClearAtOffset.placementPoint),
+                bounds: bestClearAtOffset.bounds,
+                side: bestClearAtOffset.side,
+                offset: bestClearAtOffset.offset
+            };
+        }
+
+        if (bestAtOffset && (
+            !bestCandidate ||
+            bestAtOffset.collisionCount < bestCandidate.collisionCount ||
+            (bestAtOffset.collisionCount === bestCandidate.collisionCount && bestAtOffset.clearance > bestCandidate.clearance) ||
+            (bestAtOffset.collisionCount === bestCandidate.collisionCount && bestAtOffset.clearance === bestCandidate.clearance && bestAtOffset.boundsClearance > bestCandidate.boundsClearance) ||
+            (bestAtOffset.collisionCount === bestCandidate.collisionCount && bestAtOffset.clearance === bestCandidate.clearance && bestAtOffset.boundsClearance === bestCandidate.boundsClearance && bestAtOffset.offset < bestCandidate.offset)
+        )) {
+            bestCandidate = bestAtOffset;
+        }
     }
 
-    if (!direction || (!direction.x && !direction.y)) {
-        return map.layerPointToLatLng(currentPoint);
-    }
+    const fallbackCandidate = bestCandidate || scoreCandidate(currentPoint);
+    return {
+        latLng: map.layerPointToLatLng(fallbackCandidate.placementPoint),
+        bounds: fallbackCandidate.bounds,
+        side: fallbackCandidate.side,
+        offset: fallbackCandidate.offset
+    };
+}
 
-    const length = Math.hypot(direction.x, direction.y) || 1;
-    const unit = direction.divideBy(length);
-    const normal = L.point(-unit.y, unit.x);
-    const outward = currentPoint.add(normal.multiplyBy(offsetPx));
-    const inward = currentPoint.subtract(normal.multiplyBy(offsetPx));
+function createRouteIcaoLabelIcon(code, labelSize = null) {
+    const label = normalizeMissionText(code) || '';
+    const resolvedSize = labelSize && Number.isFinite(labelSize.width) && Number.isFinite(labelSize.height)
+        ? labelSize
+        : getRouteIcaoLabelSize(label);
 
-    const outwardDistance = Math.hypot(outward.x - routeCenterPoint.x, outward.y - routeCenterPoint.y);
-    const inwardDistance = Math.hypot(inward.x - routeCenterPoint.x, inward.y - routeCenterPoint.y);
-    const placementPoint = outwardDistance >= inwardDistance ? outward : inward;
-
-    return map.layerPointToLatLng(placementPoint);
+    return L.divIcon({
+        className: 'route-icao-label',
+        html: escapeHtml(label),
+        iconSize: [resolvedSize.width, resolvedSize.height],
+        iconAnchor: [Math.ceil(resolvedSize.width / 2), Math.ceil(resolvedSize.height / 2)]
+    });
 }
 
 function createRouteDirectionIcon(angle) {
@@ -4338,6 +4812,18 @@ function createRouteDirectionIcon(angle) {
         `,
         iconSize: [20, 16],
         iconAnchor: [18, 8]
+    });
+}
+
+function createRouteLegNumberIcon(legNumber) {
+    const label = String(legNumber);
+    const width = Math.max(14, (label.length * 8) + 4);
+
+    return L.divIcon({
+        className: 'route-leg-number-marker',
+        html: escapeHtml(label),
+        iconSize: [width, 14],
+        iconAnchor: [Math.ceil(width / 2), 7]
     });
 }
 
@@ -4357,13 +4843,7 @@ function createAirportCircleMarker(latlng) {
 function buildMissionTooltipHTML(mission) {
     const legs = Array.isArray(mission.legs) ? [...mission.legs].sort((a, b) => getDateTimestamp(a.takeoffTime) - getDateTimestamp(b.takeoffTime)) : [];
     const routeLines = legs.length > 0
-        ? legs.map((leg, index) => {
-            const takeoffName = escapeHtml(getAirportDisplayName(leg.takeoffIcao));
-            const landName = escapeHtml(getAirportDisplayName(leg.landIcao));
-            const takeoffTime = escapeHtml(formatTooltipDateTime(leg.takeoffTime));
-            const landTime = escapeHtml(formatTooltipDateTime(leg.landTime));
-            return `<div class="tooltip-leg-line">Leg ${index + 1}: ${takeoffName} (${takeoffTime}) → ${landName} (${landTime})</div>`;
-        }).join('')
+        ? legs.map((leg, index) => `<div class="tooltip-leg-line">${escapeHtml(getTooltipLegText(leg, index))}</div>`).join('')
         : '<div>No route legs available.</div>';
     const flightHours = escapeHtml(formatMissionFlightHours(mission));
 
@@ -4427,6 +4907,16 @@ async function renderHoverRouteMap(mission, token) {
         });
 
         const routePoints = routePointEntries.map(entry => entry.point);
+        const routeLabelSizesByCode = new Map(routePointEntries.map(entry => [entry.code, getRouteIcaoLabelSize(entry.code)]));
+        const routeLabelPadding = Math.max(
+            18,
+            Math.ceil(routePointEntries.reduce((max, entry) => {
+                const labelSize = routeLabelSizesByCode.get(entry.code);
+                if (!labelSize) return max;
+                const placementExtent = Math.hypot(labelSize.width / 2, labelSize.height / 2) + ROUTE_AIRPORT_DOT_EDGE_PX + ROUTE_ICAO_LABEL_VERTICAL_GAP_PX + ROUTE_ICAO_LABEL_CLEARANCE_PX;
+                return Math.max(max, placementExtent);
+            }, 0))
+        );
 
         if (routePoints.length < 2) {
             statusEl.textContent = 'Route map unavailable for this mission.';
@@ -4460,29 +4950,53 @@ async function renderHoverRouteMap(mission, token) {
         const routeLayer = L.layerGroup().addTo(hoverRouteMap);
 
         L.polyline(routePoints, { color: '#d71920', weight: 4 }).addTo(routeLayer);
-        hoverRouteMap.fitBounds(routePoints, { padding: [18, 18] });
+        hoverRouteMap.fitBounds(routePoints, { padding: [routeLabelPadding, routeLabelPadding] });
 
-        routePointEntries.forEach(entry => {
-            createAirportCircleMarker(entry.point).addTo(routeLayer);
+        // Repeated stops fan out to the right so duplicate destinations stay readable.
+        // The first return to the mission origin stays centered on the origin dot.
+        const routeOriginCode = routePointEntries[0] ? routePointEntries[0].code : '';
+        const routePointOccurrenceCounts = new Map();
+        const routePointPlacements = routePointEntries.map(entry => {
+            const occurrenceIndex = routePointOccurrenceCounts.get(entry.code) || 0;
+            routePointOccurrenceCounts.set(entry.code, occurrenceIndex + 1);
+
+            if (occurrenceIndex === 0) {
+                return L.latLng(entry.point);
+            }
+
+            if (entry.code === routeOriginCode && occurrenceIndex === 1) {
+                return L.latLng(entry.point);
+            }
+
+            return getRouteOffsetPlacement(
+                hoverRouteMap,
+                entry.point,
+                (entry.code === routeOriginCode ? occurrenceIndex - 1 : occurrenceIndex) * ROUTE_AIRPORT_DOT_RADIUS_PX,
+                0
+            );
         });
+
+        routePointPlacements.forEach(point => {
+            createAirportCircleMarker(point).addTo(routeLayer);
+        });
+
+        const placedLabelBounds = [];
 
         routePointEntries.forEach((entry, index) => {
             const { code } = entry;
             if (markerCodes.has(code)) return;
             markerCodes.add(code);
-            const labelLatLng = getRouteLabelPlacement(hoverRouteMap, routePoints, index);
-            L.marker(labelLatLng, {
+            const labelSize = routeLabelSizesByCode.get(code) || getRouteIcaoLabelSize(code);
+            const labelPlacement = getRouteLabelPlacement(hoverRouteMap, routePoints, index, labelSize, placedLabelBounds, routePointPlacements);
+            placedLabelBounds.push(labelPlacement.bounds);
+            L.marker(labelPlacement.latLng, {
                 interactive: false,
                 keyboard: false,
-                icon: L.divIcon({
-                    className: 'route-icao-label',
-                    html: escapeHtml(code),
-                    iconSize: null,
-                    iconAnchor: [0, 0]
-                })
+                icon: createRouteIcaoLabelIcon(code, labelSize)
             }).addTo(routeLayer);
         });
 
+        let legNumber = 1;
         for (let i = 0; i < routePoints.length - 1; i++) {
             const start = routePoints[i];
             const end = routePoints[i + 1];
@@ -4494,6 +5008,15 @@ async function renderHoverRouteMap(mission, token) {
                 keyboard: false,
                 icon: createRouteDirectionIcon(placement.angle)
             }).addTo(routeLayer);
+
+            const legPlacement = getRouteLegNumberPlacement(hoverRouteMap, routePointPlacements[i + 1]);
+            L.marker(legPlacement, {
+                interactive: false,
+                keyboard: false,
+                zIndexOffset: 1000,
+                icon: createRouteLegNumberIcon(legNumber)
+            }).addTo(routeLayer);
+            legNumber += 1;
         }
 
         routeMapEl.style.visibility = 'visible';
@@ -4607,12 +5130,12 @@ async function buildMissionDataFromForm() {
 
         const tkText = normalizeMissionText(tkInput.value);
         const ldText = normalizeMissionText(ldInput.value);
-        const tkCodeLike = /^[A-Za-z0-9]{4}$/.test(tkText);
-        const ldCodeLike = /^[A-Za-z0-9]{4}$/.test(ldText);
-        const tkSuggestions = tkCodeLike ? [] : getAirportLookupSuggestions(tkText);
-        const ldSuggestions = ldCodeLike ? [] : getAirportLookupSuggestions(ldText);
+        const tkValidIcao = isValidAirportIcaoCode(tkText);
+        const ldValidIcao = isValidAirportIcaoCode(ldText);
+        const tkSuggestions = tkValidIcao ? [] : getAirportLookupSuggestions(tkText);
+        const ldSuggestions = ldValidIcao ? [] : getAirportLookupSuggestions(ldText);
 
-        if (!tkCodeLike && !airportIssue) {
+        if (!tkValidIcao && !airportIssue) {
             airportIssue = {
                 input: tkInput,
                 label: 'Origin',
@@ -4620,7 +5143,7 @@ async function buildMissionDataFromForm() {
             };
         }
 
-        if (!ldCodeLike && !airportIssue) {
+        if (!ldValidIcao && !airportIssue) {
             airportIssue = {
                 input: ldInput,
                 label: 'Destination',
@@ -5803,12 +6326,14 @@ function addLegRow(legData = null) {
             <div class="form-col leg-col-short leg-airport-field">
                 <label class="leg-label">Origin</label>
                 <input type="text" class="leg-tk-icao" required value="${escapeHtml(defaultLegData.takeoffIcao || '')}" aria-autocomplete="list" aria-expanded="false">
+                <div class="airport-name-display" aria-live="polite" hidden></div>
                 <div class="airport-lookup-panel" role="listbox" hidden></div>
             </div>
             <div class="form-col leg-col-wide"><label class="leg-label">Takeoff Time</label><input type="datetime-local" class="leg-tk-time" required value="${toDateTimeLocal(defaultLegData.takeoffTime)}"></div>
             <div class="form-col leg-col-short leg-airport-field">
                 <label class="leg-label">Destination</label>
                 <input type="text" class="leg-ld-icao" required value="${escapeHtml(defaultLegData.landIcao || '')}" aria-autocomplete="list" aria-expanded="false">
+                <div class="airport-name-display" aria-live="polite" hidden></div>
                 <div class="airport-lookup-panel" role="listbox" hidden></div>
             </div>
             <div class="form-col leg-col-wide"><label class="leg-label">Land Time</label><input type="datetime-local" class="leg-ld-time" required value="${toDateTimeLocal(defaultLegData.landTime)}"></div>
@@ -5830,6 +6355,8 @@ function addLegRow(legData = null) {
     attachAirportLookupBehavior(takeoffIcaoInput);
     attachAirportLookupBehavior(landIcaoInput);
     legsWrapper.appendChild(div);
+    updateAirportNameDisplay(takeoffIcaoInput);
+    updateAirportNameDisplay(landIcaoInput);
     if (takeoffIcaoInput) scheduleAirportLookupPanelUpdate(takeoffIcaoInput);
     if (landIcaoInput) scheduleAirportLookupPanelUpdate(landIcaoInput);
     if (!legData) syncEditingMissionPreview();
