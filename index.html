@@ -77,7 +77,7 @@
                             <option value="local-file">Local File</option>
                             <option value="sharepoint-list">SharePoint List</option>
                             <option value="onedrive-file">OneDrive File</option>
-                            <option value="google-cloud-file">Google Cloud File</option>
+                            <option value="google-cloud-file">Google Cloud Shared File</option>
                         </select>
                     </div>
                     <div class="form-col" id="sharepoint-sync-status-panel" hidden>
@@ -97,7 +97,7 @@
                         </div>
                     </div>
                     <div class="form-col" id="googlecloud-sync-status-panel" hidden>
-                        <label>Google Cloud Status</label>
+                        <label>Shared Google Cloud Status</label>
                         <div class="sync-status-row">
                             <span id="googlecloud-sync-status" class="sync-status-text">Disconnected</span>
                             <button type="button" class="btn btn-small" id="btn-googlecloud-connect">Connect</button>
@@ -153,11 +153,11 @@
                 </div>
                 <div class="sync-settings-group" id="googlecloud-sync-settings" hidden>
                     <div class="form-row">
-                        <div class="form-col"><label>Client ID</label><input type="text" id="defaultGoogleCloudClientId" placeholder="Google Cloud OAuth client ID" value="164691062517-j5flaa234p213pdspid9p045jtkh5pp3.apps.googleusercontent.com "></div>
-                        <div class="form-col"><label>File Name</label><input type="text" id="defaultGoogleCloudFileName" placeholder="themis_operations_missions.json"></div>
+                        <div class="form-col"><label>Client ID</label><input type="text" id="defaultGoogleCloudClientId" placeholder="Google Cloud OAuth client ID" value="164691062517-j5flaa234p213pdspid9p045jtkh5pp3.apps.googleusercontent.com"></div>
+                        <div class="form-col"><label>Shared File Name</label><input type="text" id="defaultGoogleCloudFileName" placeholder="themis_operations_missions.json" value="1RBGAjIzZSBomJwMTNipayG5_2AyAng8F"></div>
                     </div>
                     <div class="form-row">
-                        <div class="form-col"><label>Folder ID (optional)</label><input type="text" id="defaultGoogleCloudFolderId" placeholder="Google Cloud folder ID"></div>
+                        <div class="form-col"><label>Shared Folder ID</label><input type="text" id="defaultGoogleCloudFolderId" placeholder="Shared Google Drive folder ID"></div>
                     </div>
                     <input type="hidden" id="defaultGoogleCloudFileId">
                 </div>
